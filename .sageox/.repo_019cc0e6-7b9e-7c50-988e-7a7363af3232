@@ -1,0 +1,24 @@
+{
+  "repo_id": "repo_019cc0e6-7b9e-7c50-988e-7a7363af3232",
+  "type": "git",
+  "init_at": "2026-03-06T02:07:36Z",
+  "init_by_email": "apace@defrecord.com",
+  "init_by_name": "Aidan Pace",
+  "repo_salt": "64631ef1f46e9de3e8a60ac1245db007d0970de4",
+  "endpoint": "https://sageox.ai",
+  "fingerprint": {
+    "first_commit": "64631ef1f46e9de3e8a60ac1245db007d0970de4",
+    "monthly_checkpoints": {
+      "2026-03": "64631ef1f46e9de3e8a60ac1245db007d0970de4"
+    },
+    "ancestry_samples": [
+      "64631ef1f46e9de3e8a60ac1245db007d0970de4"
+    ]
+  },
+  "team_urls": {
+    "defrecord": "https://git.sageox.ai/sageox-team_zs4m5dzi79/team-context.git"
+  },
+  "urls_cached_at": "2026-03-06T02:07:37Z",
+  "version": "0.2.0",
+  "updated_at": "2026-03-06T02:07:37Z"
+}

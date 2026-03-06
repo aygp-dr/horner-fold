@@ -1,4 +1,67 @@
+# OS
+.DS_Store
+Thumbs.db
+*~
+\#*\#
+.\#*
+
+# Editors
+*.swp
+*.swo
+.vscode/
+.idea/
+*.sublime-workspace
 
 # Dolt database files (added by bd init)
 .dolt/
 *.db
+
+# Worktrees (added by sb init)
+worktrees/
+
+# Build artifacts
+*.o
+*.so
+*.dylib
+*.exe
+*.out
+/build/
+/dist/
+/target/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.eggs/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Scheme / Guile
+*.go
+!Makefile
+*.log
+
+# Haskell
+.stack-work/
+*.hi
+*.dyn_hi
+*.dyn_o
+dist-newstyle/
+.cabal-sandbox/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Coverage / profiling
+htmlcov/
+.coverage
+*.prof
