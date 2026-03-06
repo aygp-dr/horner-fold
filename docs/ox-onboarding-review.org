@@ -270,6 +270,85 @@ All SageOX documentation, blog posts, and HN examples that wrap =claude=
 should use =claude -p=. The =ox integrate= command should verify or set this
 in the Claude Code config.
 
+* R008 — Multiline =claude -p= prompt fails in =tmux new-window=
+
+** Conjecture
+
+Shell quoting passes multiline string through =tmux new-window=:
+
+#+BEGIN_SRC sh :eval no
+tmux new-window -n ox-review -d "claude -p '/ox-prime
+Read horner-fold.org...
+/ox-commit'"
+#+END_SRC
+
+** Refuted
+
+Window did not persist --- =tmux list-windows= showed only window 0.
+Multiline strings inside =tmux new-window= double-quote context collapse or
+truncate. The newlines break the shell argument boundary.
+
+Refutation agent note: "The window didn't persist --- likely claude -p with
+the multiline prompt needs quoting adjusted."
+
+** Resolution
+
+Heredoc via intermediate script:
+
+#+BEGIN_SRC sh :tangle ../.tmp/ox-review.sh :mkdirp t :shebang "#!/usr/bin/env bash"
+cd /Users/jwalsh/ghq/github.com/aygp-dr/horner-fold
+claude -p "$(cat <<'PROMPT'
+/ox-prime
+
+Read horner-fold.org. Implement property-based tests in Guile/SRFI-64
+verifying the encode/decode round-trip invariant for base 128.
+Document refuted approaches in .cprr/.
+
+/ox-commit
+PROMPT
+)"
+#+END_SRC
+
+Launch:
+
+#+BEGIN_SRC sh :eval no
+chmod +x .tmp/ox-review.sh
+tmux new-window -n ox-review -d "bash .tmp/ox-review.sh; exec bash"
+#+END_SRC
+
+Confirmed working: =tmux list-windows= shows window =1: ox-review= active.
+
+** Pattern
+
+Any multiline =claude -p= prompt launched via tmux requires an intermediate
+script. The =\$(cat <<'PROMPT' ... PROMPT)= heredoc is the reliable idiom.
+This should be the standard wrapper pattern for =ox run= (the missing
+primitive from R007).
+
+** Suggested =ox run= implementation
+
+#+BEGIN_SRC sh :eval no
+#!/usr/bin/env bash
+# ox run "prompt text"
+PROMPT="$1"
+SCRIPT=$(mktemp /tmp/ox-run-XXXXXX.sh)
+cat > "$SCRIPT" <<EOF
+#!/usr/bin/env bash
+cd $(pwd)
+claude -p "\$(cat <<'PROMPT'
+/ox-prime
+
+${PROMPT}
+
+/ox-commit
+PROMPT
+)"
+ox session upload
+EOF
+chmod +x "$SCRIPT"
+tmux new-window -n "ox-$(date +%s)" -d "bash $SCRIPT"
+#+END_SRC
+
 * Meta: What Would Have Helped
 
 A single =ox quickstart= command that runs:
@@ -298,3 +377,4 @@ equivalent for SageOX should be =ox integrate && claude=.
 | R005 | Capture is PTY wrapping                  | Refuted  | Medium   |
 | R006 | Blog syntax works without =-p= flag     | Refuted  | Medium   |
 | R007 | Capture is slash commands, not daemon    | Confirmed | Critical |
+| R008 | Multiline =claude -p= works in tmux     | Refuted  | Medium   |
