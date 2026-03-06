@@ -1,0 +1,328 @@
+#+TITLE: Horner-Fold Mermaid Diagrams
+#+AUTHOR: jwalsh
+#+DATE: 2026-03-05
+#+OPTIONS: toc:2 num:t
+#+PROPERTY: header-args:mermaid :exports both :eval never-export
+
+* Review of Existing Diagrams
+
+** horner-fold.org — Pipeline Flowchart
+
+The mermaid block in =horner-fold.org= (line 25) uses =:file horner-pipeline.png=
+and is a =flowchart LR= showing the encode/decode pipeline. The original had an
+incorrect bignum value (456274836960289); the correct encoding of "horner!" at
+base 128 is *461241602111777* (now fixed).
+
+Syntax issues:
+- The block header =#+BEGIN_SRC mermaid :file horner-pipeline.png= is valid for
+  ob-mermaid (mmdc will produce the PNG).
+- The flowchart syntax itself is correct and will render in all three targets.
+- Newlines in node labels (=\n=) are supported in flowchart nodes.
+
+** README.org — Pipeline Flowchart
+
+The mermaid block in =README.org= (line 11) uses =:file docs/horner-pipeline.png=
+and contains the *correct* bignum value (461241602111777). The flowchart syntax is
+identical in structure to the one in =horner-fold.org= with minor label differences
+("fold Horner" vs "reduce/fold Horner", "unfold quot/rem" vs "unfold quotient/remainder").
+
+Both are syntactically valid Mermaid.
+
+** docs/ox-cli-analysis.org — State Machine Descriptions
+
+This file contains five ASCII-art state machines in =#+BEGIN_EXAMPLE= blocks
+(bd issue lifecycle, sb worktree lifecycle, cprr conjecture states, gt agent work
+lifecycle, ox session lifecycle). These are *not* mermaid blocks and do not render
+as diagrams anywhere. They are candidates for conversion to =stateDiagram-v2= but
+are outside the scope of this project's Horner theme.
+
+* Rendering Compatibility Notes
+
+| Diagram type     | GitHub .md | GitHub .org  | ob-mermaid (mmdc) | Notes                                    |
+|------------------+------------+--------------+-------------------+------------------------------------------|
+| flowchart LR     | Yes        | Source only  | Yes               | Core type, universal support             |
+| stateDiagram-v2  | Yes        | Source only  | Yes (mmdc >= 9.4) | v1 deprecated; use v2 always             |
+| quadrantChart    | Yes        | Source only  | Yes (mmdc >= 10.x)| Point label overlap not handled          |
+| block-beta       | Partial    | Source only  | Yes (mmdc >= 10.6)| GitHub support lagging                   |
+
+*Key fact*: GitHub renders mermaid inside =```mermaid= fenced code blocks in
+=.md= files. GitHub does *not* render mermaid in =.org= files — the
+=#+BEGIN_SRC mermaid= block appears as literal source text. There is no
+workaround for this other than tangling to =.mmd= files and rendering PNGs
+via mmdc, then including the PNGs with =[[file:...]]= links.
+
+For ob-mermaid: all blocks below use =:file= to invoke mmdc. They also use
+=:tangle= to write standalone =.mmd= files for direct mmdc debugging.
+
+* Diagram: Fold/Unfold Duality
+
+Catamorphism (fold) collapses a list into a scalar. Anamorphism (unfold)
+generates a list from a seed. The encode/decode pair composes them into a
+hylomorphism (round-trip identity).
+
+#+BEGIN_SRC mermaid :file diagrams/fold-unfold-duality.png :tangle diagrams/fold-unfold-duality.mmd :mkdirp t
+flowchart LR
+    subgraph Catamorphism["Catamorphism (fold)"]
+        direction LR
+        L1["List\n[a0, a1, ..., an]"]
+        S1["Scalar\nfoldl (acc*b + c) 0"]
+    end
+    subgraph Anamorphism["Anamorphism (unfold)"]
+        direction RL
+        S2["Scalar\nn"]
+        L2["List\nunfoldr (div, mod)"]
+    end
+
+    L1 -->|"encode: acc * base + element"| S1
+    S2 -->|"decode: quotient / remainder"| L2
+
+    S1 -. "hylomorphism\n(roundtrip identity)" .-> S2
+
+    style Catamorphism fill:#e8f4e8,stroke:#2d7d2d
+    style Anamorphism fill:#e8e8f4,stroke:#2d2d7d
+#+END_SRC
+
+* Diagram: Lambda Argument Order
+
+The main portability hazard across Lisp dialects: some put the element first
+in the fold lambda, others put the accumulator first.
+
+#+BEGIN_SRC mermaid :file diagrams/lambda-arg-order.png :tangle diagrams/lambda-arg-order.mmd :mkdirp t
+flowchart TD
+    subgraph ElemFirst["(element, accumulator) -- SRFI-1 convention"]
+        G1["Guile\nfold (SRFI-1)"]
+        R1["Racket\nfoldl"]
+    end
+    subgraph AccFirst["(accumulator, element) -- majority convention"]
+        G2["Guile\nfold-left (rnrs)"]
+        C1["Chez\nfold-left"]
+        E1["Elisp\ncl-reduce"]
+        CJ["Clojure\nreduce"]
+        J1["Janet\nreduce"]
+    end
+
+    K["Horner kernel\nacc * base + element"]
+
+    G1 --> K
+    R1 --> K
+    G2 --> K
+    C1 --> K
+    E1 --> K
+    CJ --> K
+    J1 --> K
+
+    style ElemFirst fill:#fff3e0,stroke:#e65100
+    style AccFirst fill:#e3f2fd,stroke:#1565c0
+    style K fill:#fce4ec,stroke:#c62828
+#+END_SRC
+
+* Diagram: Project Structure
+
+#+BEGIN_SRC mermaid :file diagrams/project-structure.png :tangle diagrams/project-structure.mmd :mkdirp t
+flowchart TD
+    Root["horner-fold/"]
+
+    Root --> Literate["horner-fold.org\nliterate source"]
+    Root --> Readme["README.org"]
+    Root --> Guile1["horner-guile.scm\nSRFI-1 fold"]
+    Root --> Guile2["horner-guile-rnrs.scm\nrnrs fold-left"]
+    Root --> Chez["horner-chez.scm\nnative fold-left"]
+    Root --> Racket["horner-racket.rkt\nfoldl + for/fold"]
+    Root --> Elisp["horner.el\ncl-reduce + seq-reduce"]
+    Root --> Clojure["horner.clj\nreduce + threading"]
+    Root --> Janet["horner.janet\nreduce + string/bytes"]
+    Root --> Formal["formal/"]
+    Root --> Tests["tests/"]
+    Root --> Docs["docs/"]
+
+    Formal --> Alloy["alloy/horner.als\nbounded model checking"]
+    Formal --> TLA["tlaplus/Horner.tla\nstate-level invariants"]
+    Formal --> Lean["lean4/Horner/Basic.lean\nstructural induction proofs"]
+
+    Tests --> PyTest["test_properties.py"]
+    Tests --> ScmTest["test-properties.scm"]
+
+    style Literate fill:#fff9c4,stroke:#f9a825
+    style Formal fill:#e8eaf6,stroke:#283593
+    style Alloy fill:#e8eaf6,stroke:#283593
+    style TLA fill:#e8eaf6,stroke:#283593
+    style Lean fill:#e8eaf6,stroke:#283593
+#+END_SRC
+
+* Diagram: Horner State Machine (encode/decode "hi" at base 128)
+
+Encoding "hi": h=104, i=105, base=128.
+
+Encode steps: 0 -> 104 -> 13417
+Decode steps: 13417 -> 104 remainder 105 -> 0 remainder 104
+
+#+BEGIN_SRC mermaid :file diagrams/horner-state-machine.png :tangle diagrams/horner-state-machine.mmd :mkdirp t
+stateDiagram-v2
+    state "ENCODE (fold left)" as enc {
+        [*] --> E0: start
+        E0: acc = 0
+        E0 --> E1: read 'h' (104)
+        E1: acc = 0 * 128 + 104 = 104
+        E1 --> E2: read 'i' (105)
+        E2: acc = 104 * 128 + 105 = 13417
+        E2 --> [*]: done
+    }
+
+    state "DECODE (unfold)" as dec {
+        [*] --> D0: start
+        D0: n = 13417
+        D0 --> D1: divmod(13417, 128)
+        D1: quotient = 104, remainder = 105 ('i')
+        D1 --> D2: divmod(104, 128)
+        D2: quotient = 0, remainder = 104 ('h')
+        D2 --> [*]: n = 0, done
+    }
+
+    enc --> dec: roundtrip
+    note right of enc: catamorphism\nlist -> scalar
+    note right of dec: anamorphism\nscalar -> list
+#+END_SRC
+
+* Diagram: Cross-Dialect Comparison
+
+Quadrant chart placing dialects on two axes:
+- X axis: fold argument order (element-first vs accumulator-first)
+- Y axis: threading macro support (none vs built-in)
+
+#+BEGIN_SRC mermaid :file diagrams/dialect-comparison.png :tangle diagrams/dialect-comparison.mmd :mkdirp t
+quadrantChart
+    title Lisp Dialect Fold Characteristics
+    x-axis "(element, acc) order" --> "(acc, element) order"
+    y-axis "No threading macros" --> "Built-in threading macros"
+    quadrant-1 "acc-first + threading"
+    quadrant-2 "elem-first + threading"
+    quadrant-3 "elem-first + no threading"
+    quadrant-4 "acc-first + no threading"
+    Clojure: [0.85, 0.95]
+    Janet: [0.85, 0.80]
+    Racket: [0.20, 0.65]
+    Elisp-dash: [0.80, 0.50]
+    Chez: [0.85, 0.15]
+    Guile-rnrs: [0.80, 0.10]
+    Guile-srfi1: [0.15, 0.10]
+#+END_SRC
+
+Notes on placement:
+- Guile (SRFI-1) is element-first, no threading -> bottom left
+- Guile (rnrs) is acc-first, no threading -> bottom right
+- Chez is acc-first, no threading -> bottom right
+- Racket is element-first but has ~> (via threading lib) -> upper left area
+- Elisp is acc-first, has ->> via dash (external) -> middle right
+- Clojure is acc-first, ->> -> as-> all built-in -> top right
+- Janet is acc-first, -> ->> built-in -> upper right
+
+* Diagram: Formal Verification Pipeline
+
+Three independent verification paths, each proving different properties of
+the same Horner encode/decode specification.
+
+#+BEGIN_SRC mermaid :file diagrams/verification-pipeline.png :tangle diagrams/verification-pipeline.mmd :mkdirp t
+flowchart TD
+    Spec["Horner Specification\nencode = foldl (acc*b + c) 0\ndecode = unfoldr (div, mod)"]
+
+    Spec --> Alloy
+    Spec --> TLA
+    Spec --> Lean4
+
+    subgraph Alloy["Alloy (Bounded Model Checking)"]
+        direction TB
+        A1["horner.als"]
+        A2["RoundtripLen2\nlen=2, base<8"]
+        A3["RoundtripLen3\nlen=3, base<5"]
+        A4["HornerRecurrence\nappend property"]
+        A5["Example instance\n3 coeffs, base 3"]
+        A1 --> A2
+        A1 --> A3
+        A1 --> A4
+        A1 --> A5
+    end
+
+    subgraph TLA["TLA+ (Exhaustive State Exploration)"]
+        direction TB
+        T1["Horner.tla + Horner.cfg"]
+        T2["RoundtripInv\nall coeffs in domain"]
+        T3["EncodeNonNegInv\nencode >= 0"]
+        T4["EncodeInjectiveInv\nsame-length injectivity"]
+        T5["Concrete ASSUMEs\n123, 4259 examples"]
+        T1 --> T2
+        T1 --> T3
+        T1 --> T4
+        T1 --> T5
+    end
+
+    subgraph Lean4["Lean4 (Theorem Proving)"]
+        direction TB
+        L1["Horner/Basic.lean"]
+        L2["hornerEncode_append\nfold recurrence"]
+        L3["hornerEncode_nil\nempty = 0"]
+        L4["hornerEncode_singleton\n[c] = c"]
+        L5["hornerEncode_pair\n[a,b] = a*base + b"]
+        L6["hornerEncode_triple\n[a,b,c] = (a*base+b)*base+c"]
+        L1 --> L2
+        L1 --> L3
+        L1 --> L4
+        L1 --> L5
+        L1 --> L6
+    end
+
+    Alloy --> Result
+    TLA --> Result
+    Lean4 --> Result
+    Result["Verified Properties:\n1. Roundtrip identity\n2. Non-negativity\n3. Injectivity\n4. Structural recurrence"]
+
+    style Alloy fill:#e8eaf6,stroke:#283593
+    style TLA fill:#fce4ec,stroke:#c62828
+    style Lean4 fill:#e8f5e9,stroke:#2e7d32
+    style Spec fill:#fff9c4,stroke:#f9a825
+    style Result fill:#f3e5f5,stroke:#6a1b9a
+#+END_SRC
+
+* Rendering Summary
+
+For each diagram in this file:
+
+| Diagram                    | Type             | GitHub .md | GitHub .org | ob-mermaid |
+|----------------------------+------------------+------------+-------------+------------|
+| Fold/Unfold Duality        | flowchart LR     | Yes        | Source only | Yes        |
+| Lambda Argument Order      | flowchart TD     | Yes        | Source only | Yes        |
+| Project Structure          | flowchart TD     | Yes        | Source only | Yes        |
+| Horner State Machine       | stateDiagram-v2  | Yes        | Source only | Yes        |
+| Cross-Dialect Comparison   | quadrantChart    | Yes        | Source only | Yes (>=10) |
+| Formal Verification        | flowchart TD     | Yes        | Source only | Yes        |
+
+To render all diagrams locally with mmdc:
+
+#+BEGIN_SRC sh :eval no
+# Render all .mmd files to PNG
+for f in diagrams/*.mmd; do
+  mmdc -i "$f" -o "${f%.mmd}.png"
+done
+#+END_SRC
+
+To make diagrams visible on GitHub from .org files, render them to PNG and
+reference with =[[file:diagrams/NAME.png]]=. The mermaid source blocks will
+appear as plain text in GitHub's org renderer.
+
+* Appendix: ob-mermaid Configuration
+
+Required Emacs configuration for the =:file= header to work:
+
+#+BEGIN_SRC emacs-lisp :eval no
+(use-package ob-mermaid
+  :ensure t
+  :config
+  (setq ob-mermaid-cli-path (executable-find "mmdc")))
+
+;; Ensure mermaid is in org-babel-load-languages
+(org-babel-do-load-languages
+ 'org-babel-load-languages
+ '((mermaid . t)))
+#+END_SRC
+
+Minimum mmdc version: 10.6.1 recommended (supports all diagram types above).
+Install via: =npm install -g @mermaid-js/mermaid-cli=.

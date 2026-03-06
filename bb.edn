@@ -1,0 +1,9 @@
+{:paths ["." "src"]
+ :tasks
+ {run {:doc "Run horner.clj"
+       :task (load-file "horner.clj")}
+
+  test {:doc "Run Clojure tests under babashka"
+        :task (do
+                (require '[horner.core])
+                (load-file "tests/test_horner_bb.clj"))}}}

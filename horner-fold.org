@@ -27,7 +27,7 @@ flowchart LR
     S["string\n\"horner!\""]
     L["list of chars\n(h o r n e r !)"]
     I["list of ints\n(104 111 114 ...)"]
-    N["bignum\n456274836960289"]
+    N["bignum\n461241602111777"]
     S -->|string->list| L
     L -->|map char->int| I
     I -->|reduce/fold Horner| N
