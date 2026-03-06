@@ -1,0 +1,349 @@
+#+TITLE: ox CLI Analysis: Command Taxonomy, Idempotency, and Cross-Tool Comparison
+#+AUTHOR: jwalsh
+#+DATE: 2026-03-05
+#+OPTIONS: toc:2 num:t
+
+* Overview
+
+Systematic comparison of =ox= (SageOx 0.2.0) command structure against the
+local tool suite: =bd= (beads), =sb= (sandbox), =cprr= (conjecture tracker),
+=gt= (Gas Town). Goal: identify design pattern alignment, idempotency gaps,
+and state machine inconsistencies.
+
+* Command Taxonomy
+
+** ox (SageOx 0.2.0)
+
+*** Top-level
+
+| Command         | Category       | Mutates state? | Idempotent? | Notes                           |
+|-----------------+----------------+----------------+-------------+---------------------------------|
+| =init=          | Setup          | Yes            | Yes         | "already initialized" is no-op  |
+| =login=         | Auth           | Yes            | Yes         | Re-auth is safe                 |
+| =logout=        | Auth           | Yes            | Yes         | Logout when logged out is no-op |
+| =status=        | Diagnostic     | No             | Yes         | Read-only                       |
+| =doctor=        | Diagnostic     | No             | Yes         | Read-only                       |
+| =sync=          | Data           | Yes            | Yes         | Git push/pull                   |
+| =integrate=     | Setup          | Yes            | Unclear     | Overwrites .claude/commands/    |
+| =import=        | Data           | Yes            | No*         | =--force= for re-import         |
+| =version=       | Diagnostic     | No             | Yes         | Read-only                       |
+| =release-notes= | Diagnostic    | No             | Yes         | Read-only                       |
+| =uninstall=     | Setup          | Yes            | No          | Destructive                     |
+| =view=          | Diagnostic     | No             | Yes         | Opens browser                   |
+
+*** ox session
+
+| Command        | Mutates? | Idempotent? | Args                          | Flags                                  |
+|----------------+----------+-------------+-------------------------------+----------------------------------------|
+| =list=         | No       | Yes         | (none)                        | =--limit N=, =--all=                   |
+| =status=       | No       | Yes         | (none)                        | =--json=, =--current=                  |
+| =view=         | No       | Yes         | =[session-name]=              | =--html=, =--text=, =--json=, =--latest= |
+| =commit=       | Yes      | Yes         | (none)                        | =-m "msg"=                             |
+| =upload=       | Yes      | Yes*        | =<session-name>=              | (none) — retry-safe                    |
+| =download=     | Yes      | Yes*        | =<session-name>=              | (none) — re-download overwrites        |
+| =export=       | Yes      | Yes         | =[session-name]=              | =--html=, =--markdown=, =-o=, =--open= |
+| =remove=       | Yes      | No          | =<filename>=                  | =--all=, =--force=                     |
+| =regenerate=   | Yes      | Yes         | =[session-name]=              | =--all=, =--redact=, =--dry-run=, =--force= |
+| =redaction=    | (sub)    | —           | (subcommands)                 | —                                      |
+| =push-summary= | Yes      | Yes*        | (none)                        | (none)                                 |
+
+*** ox agent
+
+| Command                 | Mutates? | Idempotent?      | Args             | Key flags                    |
+|-------------------------+----------+------------------+------------------+------------------------------|
+| =prime=                 | Yes      | Yes (=--idempotent=) | (none)       | =--agent=, =--model=, =--text=, =--idempotent= |
+| =<id> session start=   | Yes      | *No*             | (none)           | (none)                       |
+| =<id> session stop=    | Yes      | *No*             | (none)           | (none)                       |
+| =<id> session abort=   | Yes      | *No*             | (none)           | =--force=                    |
+| =<id> session recover= | Yes      | Yes*             | (none)           | (none)                       |
+| =<id> doctor=           | No       | Yes              | (none)           | (none)                       |
+| =instances=             | No       | Yes              | (none)           | (none)                       |
+| =redact=                | No       | Yes              | (none)           | (none)                       |
+| =team-ctx=              | No       | Yes              | =[slug]=         | (none)                       |
+
+*** ox daemon
+
+| Command   | Mutates? | Idempotent? | Notes                           |
+|-----------+----------+-------------+---------------------------------|
+| =start=   | Yes      | Unclear     | Does it no-op if already running? |
+| =stop=    | Yes      | Unclear     | Does it no-op if already stopped? |
+| =restart= | Yes      | Yes         | Kill + start                    |
+| =kill=    | Yes      | Unclear     | Stronger than stop?             |
+| =status=  | No       | Yes         | Read-only                       |
+| =list=    | No       | Yes         | Read-only                       |
+| =logs=    | No       | Yes         | Read-only                       |
+
+*** ox config
+
+| Command | Mutates? | Idempotent? | Args            | Flags                      |
+|---------+----------+-------------+-----------------+----------------------------|
+| =list=  | No       | Yes         | (none)          | (none)                     |
+| =get=   | No       | Yes         | =<key>=         | (none)                     |
+| =set=   | Yes      | Yes         | =<key> <value>= | =--repo=, =--team=, =--user= |
+
+*** ox coworker
+
+| Command | Mutates? | Idempotent? | Args     |
+|---------+----------+-------------+----------|
+| =list=  | No       | Yes         | (none)   |
+| =agent= | No       | Yes         | =<name>= |
+
+** Global Flags (ox)
+
+| Flag               | Type   | Default                  |
+|--------------------+--------+--------------------------|
+| =-c, --config=     | string | =.sageox/config.yaml=    |
+| =-h, --help=       | bool   | false                    |
+| =--json=           | bool   | false                    |
+| =--no-interactive= | bool   | false (true when CI=true)|
+| =--profile=        | bool   | false                    |
+| =-q, --quiet=      | bool   | false                    |
+| =-v, --verbose=    | bool   | false                    |
+
+* Cross-Tool Comparison
+
+** Shared Patterns
+
+| Pattern              | bd  | sb  | cprr | gt  | ox   |
+|----------------------+-----+-----+------+-----+------|
+| =init=               | Yes | Yes | Yes  | Yes | Yes  |
+| =doctor=             | Yes | Yes | —    | Yes | Yes  |
+| =prime=              | Yes | Yes | —    | Yes | Yes  |
+| =status=             | Yes | —   | Yes  | Yes | Yes  |
+| =list=               | Yes | Yes | Yes  | —   | Yes  |
+| =version=            | Yes | Yes | Yes  | Yes | Yes  |
+| =--json=             | Yes | Yes | —    | —   | Yes  |
+| =--quiet=            | Yes | —   | —    | —   | Yes  |
+| =--verbose=          | Yes | —   | Yes  | —   | Yes  |
+| =-h, --help=         | Yes | —   | Yes  | Yes | Yes  |
+
+** State Machine Comparison
+
+*** bd (beads) — Issue lifecycle
+
+#+BEGIN_EXAMPLE
+open → in_progress → closed
+  ↑                    ↓
+  └── reopened ←───────┘
+  └── deferred ←───────┘
+#+END_EXAMPLE
+
+- Transitions: =create=, =update --claim=, =close=, =reopen=, =defer=, =undefer=
+- Idempotent close: Yes (closing a closed issue is no-op)
+- =--json= everywhere: Yes
+- Actor tracking: =--actor= flag
+
+*** sb (sandbox) — Worktree lifecycle
+
+#+BEGIN_EXAMPLE
+(none) → init → add → [active] → remove → prune
+#+END_EXAMPLE
+
+- =init= is idempotent (already initialized = no-op)
+- =add= is not idempotent (duplicate name = error)
+- =remove= is not idempotent (missing name = error)
+- Minimal surface area: 9 commands total
+
+*** cprr — Conjecture state machine
+
+#+BEGIN_EXAMPLE
+conjecture → hypothesis → experiment → evidence → confirmed|refuted|refined
+#+END_EXAMPLE
+
+- =next= advances state with guards (can't skip states)
+- =status= can force-set any state
+- =add= is not idempotent (always creates new)
+- Simple sequential IDs (1, 2, 3...)
+
+*** gt (Gas Town) — Agent work lifecycle
+
+#+BEGIN_EXAMPLE
+pending → sling → in_progress → done → merge_queue → merged
+  ↑                               ↓
+  └── release ←───────────────────┘
+#+END_EXAMPLE
+
+- =sling= assigns work atomically
+- =done= signals completion
+- =release= returns stuck work
+- Complex state: convoys, molecules, hooks, warrants
+- Largest command surface (~80 commands)
+
+*** ox (SageOx) — Session lifecycle
+
+#+BEGIN_EXAMPLE
+(none) → prime → session start → [recording] → session stop → [committed]
+                                                  ↓
+                                            session abort → (discarded)
+#+END_EXAMPLE
+
+- =prime= creates agent instance + returns ID
+- =session start= requires agent ID (=ox agent <id> session start=)
+- =session stop= requires agent ID
+- *No recovery from abort* (destructive, irreversible)
+- =session recover= exists for crashed sessions
+
+** Idempotency Matrix
+
+| Operation type  | bd            | sb           | cprr        | gt          | ox                   |
+|-----------------+---------------+--------------+-------------+-------------+----------------------|
+| Init            | Idempotent    | Idempotent   | Idempotent  | Idempotent  | Idempotent           |
+| Create/Add      | Not idem.     | Not idem.    | Not idem.   | Not idem.   | N/A (agent prime)    |
+| Read/List/Show  | Idempotent    | Idempotent   | Idempotent  | Idempotent  | Idempotent           |
+| Update/Advance  | Idempotent*   | N/A          | Not idem.   | Idempotent* | N/A                  |
+| Close/Stop      | Idempotent    | N/A          | N/A         | Idempotent  | *Not idempotent*     |
+| Delete/Remove   | Not idem.     | Not idem.    | Not idem.   | Not idem.   | Not idem.            |
+| Doctor/Diagnose | Idempotent    | Idempotent   | N/A         | Idempotent  | Idempotent           |
+
+** Flag Consistency
+
+| Flag pattern     | bd                | sb        | cprr      | gt       | ox                  |
+|------------------+-------------------+-----------+-----------+----------+---------------------|
+| JSON output      | =--json=          | =--json=  | —         | —        | =--json=            |
+| Quiet            | =-q, --quiet=     | —         | —         | —        | =-q, --quiet=       |
+| Verbose          | =-v, --verbose=   | —         | =-V=      | —        | =-v, --verbose=     |
+| Version          | =-V, --version=   | via cmd   | =-v=      | =-v=     | =--version=         |
+| Help             | =-h, --help=      | via cmd   | =-h=      | =-h=     | =-h, --help=        |
+| Force            | (per-cmd)         | —         | —         | —        | =--force= (per-cmd) |
+| Read-only        | =--readonly=      | —         | —         | —        | —                   |
+| Sandbox          | =--sandbox=       | —         | —         | —        | —                   |
+| Config path      | =--db=            | —         | —         | —        | =-c, --config=      |
+| Actor            | =--actor=         | —         | —         | —        | —                   |
+| Profile          | =--profile=       | —         | —         | —        | =--profile=         |
+
+*** Inconsistency: =-v= overloaded
+
+| Tool | =-v= means |
+|------+------------|
+| bd   | verbose    |
+| cprr | version    |
+| gt   | version    |
+| ox   | verbose    |
+
+=-V= is similarly overloaded (bd = version, cprr = verbose).
+
+* Stale Session / Sentinel Analysis
+
+** Observed behavior
+
+=ox agent prime --text= returned:
+
+#+BEGIN_EXAMPLE
+Agent: Oxa1ue
+Session: oxsid_01KK0G1TX13AXMZVKS3CYXXE47
+#+END_EXAMPLE
+
+But =ox agent instances= did NOT list =Oxa1ue= — only three idle instances
+from a different repo (=seven-concerns=).
+
+The local agent instance is stored in:
+
+#+BEGIN_EXAMPLE
+.sageox/agent_instances/apace/agent_instances.jsonl
+#+END_EXAMPLE
+
+with a 24h =expires_at= TTL. There is a =.lock= file alongside it.
+
+** Sentinel mechanism (inferred)
+
+ox does not appear to use an explicit sentinel file. Instead:
+
+1. =agent_instances.jsonl= tracks agent IDs with =expires_at= TTL
+2. =prime= creates a new entry (or bumps =prime_call_count=)
+3. =session start= checks for an active session on the agent ID
+4. If a prior session crashed (no =stop=), =session recover= can reclaim it
+
+** The "session already in progress" false positive
+
+When =ox agent prime= is called, it may detect a stale agent instance from a
+prior session (crashed Claude Code, killed tmux window, etc.) that was never
+stopped. The =expires_at= TTL is 24 hours, so within that window:
+
+- =session start= fails with "already active"
+- The user sees "session in progress" when none is actually running
+- =session recover= or =session abort --force= is the escape hatch
+
+This is the "sentinel" behavior — it's TTL-based agent instance tracking,
+not a lockfile sentinel. The failure mode is:
+
+#+BEGIN_EXAMPLE
+1. claude -p "/ox-prime ..." launches, gets Oxa1ue
+2. Process crashes or is killed
+3. Oxa1ue still in agent_instances.jsonl (TTL not expired)
+4. Next prime call sees stale Oxa1ue
+5. ox reports "session already in progress"
+#+END_EXAMPLE
+
+** Comparison with bd/gt approach
+
+=bd= and =gt= use =--claim= for atomic work assignment with explicit
+release (=bd reopen=, =gt release=). There is no TTL — stale claims are
+visible via =bd stale= / =gt stale= and manually released.
+
+ox's TTL approach is more automatic but less transparent. A =--force= flag
+on =session start= (or making it idempotent: "session already active,
+returning existing session ID") would match the =mkdir -p= convention.
+
+* Key Findings
+
+** ox design gaps vs. local tool suite
+
+1. *Session start/stop not idempotent* — bd =close= and gt =done= are
+   idempotent (closing already-closed is no-op). ox =session start= fails
+   if active, =session stop= fails if inactive.
+
+2. *No =--force= on session start* — bd has =--claim= (atomic), gt has
+   =sling= (atomic). ox has no way to force-start over a stale session
+   without first running =recover= or =abort=.
+
+3. *Agent ID as positional argument is unusual* — =ox agent <id> session start=
+   puts a dynamic value in the middle of the command path. bd/gt/sb all use
+   flags (=bd update <id>=) or trailing args.
+
+4. *No =--dry-run= on destructive ops* — =session abort --force= has no
+   preview. bd =delete= and gt =warrant= show what will be affected first.
+
+5. *=prime= creates implicit state* — Unlike =bd init= or =sb init= which
+   are explicit setup steps, =prime= creates an agent instance as a side
+   effect of reading context. This conflates "read config" with "register
+   agent."
+
+6. *Missing =quickstart= / =onboard= command* — bd has =quickstart= and
+   =onboard=, gt has =info= and =prime=. ox has no single command that
+   walks through init → integrate → daemon → session.
+
+** ox design strengths
+
+1. *=--idempotent= flag on prime* — Explicit opt-in idempotency is good API
+   design. bd and gt could adopt this pattern.
+
+2. *=--no-interactive=* with CI auto-detection — Better than most tools for
+   headless/agent use.
+
+3. *Redaction built-in* — None of the other tools have secret redaction as a
+   first-class concern.
+
+4. *Config layering (user > repo > team > default)* — bd has this partially;
+   others don't.
+
+5. *=--review= flag for security audit mode* — Human-readable + machine output
+   in one call. Novel pattern worth adopting.
+
+* Suggested Improvements (for ox team)
+
+1. Make =session start= idempotent: return existing session ID if already
+   recording, instead of failing.
+
+2. Add =ox quickstart= that runs =doctor → integrate → daemon start →
+   session status=.
+
+3. Move agent ID to a flag: =ox session start --agent Oxa1ue= instead of
+   =ox agent Oxa1ue session start=.
+
+4. Add =--dry-run= to =session abort=.
+
+5. Surface stale session recovery in =doctor= output (it may already — not
+   confirmed).
+
+6. Align =-v= to mean verbose everywhere (ox and bd agree; gt and cprr
+   disagree).
