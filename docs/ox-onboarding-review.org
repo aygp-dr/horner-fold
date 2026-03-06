@@ -1,0 +1,300 @@
+#+TITLE: SageOX Onboarding: Refutation Log
+#+AUTHOR: jwalsh
+#+DATE: 2026-03-05
+#+OPTIONS: toc:2 num:t
+#+PROPERTY: header-args :eval never-export
+
+* Context
+
+- Audience :: SageOX team (feedback@sageox.ai)
+- Environment :: macOS (mini.local, M4), =horner-fold= repo, Claude Code primary agent
+- Reporter :: jwalsh (Staff Automation Engineer, East Boston)
+
+This is a CPRR-style (Conjecture-Proof-Refutation-Refinement) log of
+commands tried, expected behavior, and actual behavior. Ordered chronologically.
+
+* R001 — =ox-session= as standalone binary
+
+** Conjecture
+
+SageOX blog post and HN thread reference =ox-session= as a command, implying
+a standalone binary like =git-lfs= or =docker-compose=.
+
+** Tried
+
+#+BEGIN_SRC sh :eval no
+ox-session -- claude "..."
+# zsh: command not found: ox-session
+#+END_SRC
+
+** Refuted
+
+=ox-session= does not exist as a binary. It is not in PATH after install.
+The blog demo implies =ox-session= is a wrapper; the actual CLI suggests
+recording is passive via daemon.
+
+** Expected
+
+Either a =ox-session= symlink/shim exists post-install, or the blog/docs
+clarify that session recording is daemon-driven, not a wrapper.
+
+** Suggested fix
+
+Add =ox-session= as an alias for =ox session record= or =ox session start=,
+or update blog copy to not imply it's a standalone command.
+
+* R002 — =ox session start= does not start a session
+
+** Conjecture
+
+=ox session start= should begin recording a session, analogous to
+=tmux new-session= or =script(1)=.
+
+** Tried
+
+#+BEGIN_SRC sh :eval no
+ox session start
+# prints help for `ox session` subcommand group
+# no recording initiated
+#+END_SRC
+
+** Refuted
+
+=ox session start= is not a valid subcommand. The help output lists:
+=commit=, =download=, =export=, =list=, =push-summary=, =redaction=,
+=regenerate=, =remove=, =status=, =upload=, =view=. No =start=.
+
+** Expected
+
+=ox session start= initiates a recording, =ox session stop= terminates it.
+Standard POSIX service lifecycle idiom.
+
+** Suggested fix
+
+Add =ox session start= / =ox session stop= as daemon control aliases, or
+make the help text for =ox session= explicitly state "recording is automatic
+via daemon --- see =ox daemon status=."
+
+* R003 — =ox session list= should exist
+
+** Conjecture
+
+=ox session list= should list recorded sessions, analogous to =git log=,
+=tmux list-sessions=, =docker ps=.
+
+** Tried
+
+#+BEGIN_SRC sh :eval no
+ox session list
+# behavior TBD — command exists per help text but not yet verified
+#+END_SRC
+
+** Status
+
+Listed in =ox session= help output. Not yet confirmed to work correctly.
+Logging here because discoverability is poor --- it is not starred (★) as a
+suggested next action despite being the most natural first command after setup.
+
+** Suggested fix
+
+Star =ox session list= as a suggested next action in =ox session= help. It
+is the most important command for verifying that the daemon is actually
+capturing sessions.
+
+* R004 — Onboarding path is non-obvious
+
+** Conjecture
+
+The suggested next actions (★) in =ox= help output guide a new user to a
+working session recording setup.
+
+** Observed starred commands
+
+- =ox status=
+- =ox doctor=
+
+** Refuted
+
+Neither =ox status= nor =ox doctor= is sufficient to get to a recorded
+session. The missing steps between "installed" and "session captured":
+
+1. =ox daemon start= --- not starred, not surfaced
+2. =ox integrate= --- not starred despite being the Claude Code bridge
+3. =ox session status= --- not starred despite being the verification step
+
+** Suggested fix
+
+After =ox init=, the suggested next actions should be:
+
+#+BEGIN_EXAMPLE
+★ ox integrate      # wire into Claude Code
+★ ox daemon start   # ensure capture is running
+★ ox session status # verify recording is active
+#+END_EXAMPLE
+
+* R005 — Blog demo implies =ox session= is a PTY wrapper
+
+** Conjecture
+
+From the HN post:
+
+#+BEGIN_QUOTE
+"With a single prompt, developer asks agent to implement the discussed
+feature. Their session is recorded with ox-session"
+#+END_QUOTE
+
+This implies =ox-session= wraps the agent process and captures its output,
+like =script(1)= or =asciinema rec=.
+
+** Actual model (inferred)
+
+Daemon-based passive capture, not PTY wrapping.
+
+** Problem
+
+PTY wrapping is a stronger guarantee --- you know exactly what is and isn't
+captured. Daemon-based capture depends on hooks that may or may not fire. For
+a tool whose value proposition is "nothing is lost," the capture model needs
+to be explicit and verifiable.
+
+** Suggested fix
+
+Documentation should explicitly state the capture mechanism (daemon hooks?
+Claude Code MCP integration? filesystem watch?). =ox doctor= output should
+confirm which capture pathway is active.
+
+* R007 — Session capture is slash commands, not daemon or PTY wrapper
+
+** Conjecture (revised from R005)
+
+Recording is daemon-based passive capture.
+
+** Actual mechanism (inferred from =ox integrate= behavior)
+
+=ox integrate= writes markdown files into =.claude/commands/=, which Claude
+Code exposes as slash commands. The agent (or human) calls these at session
+boundaries:
+
+#+BEGIN_EXAMPLE
+.claude/commands/
+├── ox-prime.md    →  /ox-prime   (pull ledger context at session start)
+├── ox-commit.md   →  /ox-commit  (push session summary at session end)
+└── ox-status.md   →  /ox-status  (verify ledger connection)
+#+END_EXAMPLE
+
+** Implication
+
+There is no passive capture. Recording requires the agent to explicitly call
+=/ox-prime= and =/ox-commit=. The =ox agent= subcommand ("Not for Human Use")
+is the programmatic interface these commands invoke.
+
+** Impact on R005 and R006
+
+The =claude -p= wrapper framing is wrong --- the correct model is interactive
+Claude Code with slash commands, not a headless subprocess.
+=ox session record -- claude -p "..."= is not the idiom.
+
+** The actual correct idiom (interactive)
+
+#+BEGIN_SRC sh :eval no
+cd horner-fold
+claude                    # open Claude Code interactive
+/ox-prime                 # pulls ledger context
+# [do work]
+/ox-commit                # pushes session summary
+#+END_SRC
+
+** Non-interactive idiom (preferred --- =claude -p= headless)
+
+#+BEGIN_SRC sh :eval no
+claude -p "/ox-prime
+
+Read horner-fold.org. Implement property-based tests in Guile/SRFI-64
+verifying the encode/decode round-trip invariant for base 128.
+Document refuted approaches in .cprr/.
+
+/ox-commit"
+#+END_SRC
+
+Slash commands in the prompt body, =claude -p= for clean headless execution
+and unambiguous process boundary. Composable with =ox session upload= after.
+
+** Problem
+
+This is entirely invisible until you inspect =.claude/commands/= post-
+=ox integrate=. The onboarding docs, blog, and HN post describe none of this.
+The mental model of "daemon captures everything" is flatly wrong and leads to
+all the friction in R001--R006.
+
+** Suggested fix
+
+Lead with the slash command model. It is simpler, more auditable, and more
+consistent with how Claude Code actually works. The blog demo should show
+=/ox-prime= and =/ox-commit= explicitly.
+
+* R006 — Suggested command syntax omits =claude -p=
+
+** Conjecture
+
+The HN post and SageOX blog suggest:
+
+#+BEGIN_SRC sh :eval no
+claude "Read horner-fold.org. Implement property-based tests..."
+#+END_SRC
+
+as the invocation to wrap with =ox session=.
+
+** Refuted
+
+Claude Code's non-interactive (headless, pipe-safe) mode requires the =-p=
+flag:
+
+#+BEGIN_SRC sh :eval no
+claude -p "Read horner-fold.org. Implement property-based tests..."
+#+END_SRC
+
+Without =-p=, the positional string argument is either ignored or Claude Code
+opens an interactive REPL with the prompt as initial context --- neither of
+which is suitable for a daemon-captured, scriptable session.
+
+** Impact
+
+The SageOX session capture model depends on the agent process terminating
+cleanly. An interactive =claude= session requires manual exit; =claude -p=
+exits on completion. The former is ambiguous for the daemon to detect as
+"session ended"; the latter is a clean process boundary.
+
+** Suggested fix
+
+All SageOX documentation, blog posts, and HN examples that wrap =claude=
+should use =claude -p=. The =ox integrate= command should verify or set this
+in the Claude Code config.
+
+* Meta: What Would Have Helped
+
+A single =ox quickstart= command that runs:
+
+#+BEGIN_SRC sh :eval no
+ox doctor
+ox integrate
+ox daemon start
+ox session status
+#+END_SRC
+
+and exits with a clear "you are now recording sessions" confirmation would
+have eliminated all five friction points above.
+
+The Aider analogy: =aider --model claude-3-5-sonnet= just works. The
+equivalent for SageOX should be =ox integrate && claude=.
+
+* Summary Table
+
+| ID   | Conjecture                              | Status   | Severity |
+|------+-----------------------------------------+----------+----------|
+| R001 | =ox-session= is a standalone binary     | Refuted  | Medium   |
+| R002 | =ox session start= starts recording     | Refuted  | High     |
+| R003 | =ox session list= works and is surfaced | Unverified | Low    |
+| R004 | Starred commands lead to working setup   | Refuted  | High     |
+| R005 | Capture is PTY wrapping                  | Refuted  | Medium   |
+| R006 | Blog syntax works without =-p= flag     | Refuted  | Medium   |
+| R007 | Capture is slash commands, not daemon    | Confirmed | Critical |
