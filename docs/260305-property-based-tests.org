@@ -1,0 +1,49 @@
+#+TITLE: Property-Based Tests for Horner Encode/Decode
+#+DATE: 2026-03-05
+#+TYPE: feature
+
+* Summary
+
+Added property-based tests verifying algebraic invariants of Horner's
+method encode/decode across two implementations:
+
+- =tests/test-properties.scm= — Guile Scheme (SRFI-64 + SRFI-27)
+- =tests/test_properties.py= — Python (Hypothesis + pytest)
+
+* Motivation
+
+The Horner encode/decode pair is a fold/unfold duality. Correctness
+depends on several algebraic properties that are best verified with
+randomized inputs rather than hand-picked examples.
+
+* Properties Tested
+
+| # | Property                 | Invariant                                              |
+|---+--------------------------+--------------------------------------------------------|
+| 1 | Roundtrip (string)       | =decode(encode(s, base), base) == s=                   |
+| 2 | Roundtrip (tuple)        | =decode(encode(t, base), base, len(t)) == t=           |
+| 3 | Single element identity  | =encode([x], base) == x=                               |
+| 4 | Leading zero absorption  | =encode([0] ++ t, base) == encode(t, base)=            |
+| 5 | Polynomial equivalence   | Horner matches naive sum of =c_i * base^(n-1-i)=       |
+| 6 | Monotonicity             | Larger last element gives larger encoding               |
+| 7 | Concatenation shift      | =encode(a++b) == encode(a) * base^{|b|} + encode(b)=   |
+| 8 | Known values             | =[1,2,3]= base 10 = 123; =[3,1,4,1,5]= base 6 = 4259  |
+| 9 | Known roundtrip          | ="horner!"= at base 128                                |
+| 10 | Encoding positive       | Non-empty strings with positive chars encode to > 0    |
+
+* Running
+
+#+BEGIN_SRC bash
+# Guile (1000 random trials per property)
+guile tests/test-properties.scm
+
+# Python (Hypothesis shrinking + 100 examples per property)
+uv run --with hypothesis --with pytest python3 -m pytest tests/test_properties.py -v
+#+END_SRC
+
+* Future Work
+
+- Add property tests for Racket (=rackcheck=), Clojure (=test.check=)
+- Cross-language oracle tests: compare encode outputs across all implementations
+- Test edge cases: empty string, single char, base=2, very large bases
+- Verify decode-tuple rank parameter vs variable-length decode
