@@ -1,0 +1,320 @@
+#+TITLE: ox 0.2.0 Source Dive: Session Detection, State Machine, and Hook Pipeline
+#+AUTHOR: jwalsh
+#+DATE: 2026-03-06
+#+OPTIONS: toc:2 num:t
+
+* Context
+
+Source-level analysis of =sageox/ox= v0.2.0, triggered by debugging
+why =ox agent <id> session start= fails for all =ghq=-managed repos.
+
+Hidden here in a repo about Horner's method and fold parameter order
+across Lisp dialects, because if you're reading this, you deserve it.
+
+Repository analyzed: =github.com/sageox/ox= (Go, cobra CLI)
+
+* Root Cause: The Dot Bug
+
+** The One-Liner
+
+=internal/session/adapters/claude_code.go:118-119=
+
+#+BEGIN_SRC go
+projectHash := strings.ReplaceAll(cwd, string(os.PathSeparator), "-")
+projectHash = strings.ReplaceAll(projectHash, "_", "-")
+// Claude Code ALSO replaces "." with "-", but ox does not.
+// Fix: projectHash = strings.ReplaceAll(projectHash, ".", "-")
+#+END_SRC
+
+** Why It Matters
+
+Every =ghq= user clones to =~/ghq/github.com/<org>/<repo>=. The dot in
+=github.com= survives ox's hash but not Claude Code's hash. Result:
+
+| Who         | Hash for =github.com/aygp-dr/horner-fold=     |
+|-------------+------------------------------------------------|
+| ox          | =-Users-jwalsh-ghq-github.com-aygp-dr-horner-fold= |
+| Claude Code | =-Users-jwalsh-ghq-github-com-aygp-dr-horner-fold=  |
+
+=os.Stat()= on the ox-computed path fails. =ErrSessionNotFound=. Game over.
+
+** Affected Users
+
+Anyone whose repo path contains a dot. This includes:
+- All =ghq= users (=github.com/=, =gitlab.com/=, =sr.ht/=)
+- Repos with version numbers in directory names (=node-v18.2/=)
+- Any dotfile-adjacent tooling path
+
+* Session State Machine
+
+ox does NOT use a traditional FSM. State is file-presence-based:
+
+#+BEGIN_EXAMPLE
+         ┌──────────────────────────────────────────────┐
+         │                                              │
+         ▼                                              │
+      [IDLE]                                            │
+    no .recording.json                                  │
+         │                                              │
+         │  session start                               │
+         │  (StartRecording → write .recording.json)    │
+         ▼                                              │
+    [RECORDING]                                         │
+    .recording.json present                             │
+         │                                              │
+         ├─── session stop ────→ [STOPPED]              │
+         │    (delete .recording.json,                  │
+         │     write .session_stopped marker,           │
+         │     save + upload to ledger)                 │
+         │                                         ─────┘
+         └─── session abort ───→ [ABORTED]
+              (delete .recording.json,
+               discard without saving)
+#+END_EXAMPLE
+
+Key files (=internal/session/recording.go=):
+
+| Function               | Line | Effect                      |
+|------------------------+------+-----------------------------|
+| =StartRecording()=     |  302 | IDLE → RECORDING            |
+| =StopRecording()=      |  430 | RECORDING → STOPPED         |
+| =IsRecording()=        |  213 | =LoadRecordingState() != nil= |
+| =MarkExplicitStop()=   |  223 | write =.session_stopped=    |
+| =ConsumeExplicitStop()= |  242 | read + delete marker       |
+| =ClearRecordingState()= |  187 | delete =.recording.json=   |
+
+=RecordingState= struct (lines 26-48):
+
+#+BEGIN_SRC go
+type RecordingState struct {
+    AgentID          string    `json:"agent_id"`
+    StartedAt        time.Time `json:"started_at"`
+    AdapterName      string    `json:"adapter_name"`
+    SessionFile      string    `json:"session_file"`
+    OutputFile       string    `json:"output_file"`
+    SessionPath      string    `json:"session_path"`
+    Title            string    `json:"title,omitempty"`
+    EntryCount       int       `json:"entry_count"`
+    FilterMode       string    `json:"filter_mode,omitempty"`
+    ParentSessionPath string  `json:"parent_session_path,omitempty"`
+    ParentAgentID     string  `json:"parent_agent_id,omitempty"`
+}
+#+END_SRC
+
+* Session Start Sequence
+
+=cmd/ox/agent_session.go:70-182=
+
+#+BEGIN_EXAMPLE
+ox agent Oxa7b3 session start [--title "..."]
+  │
+  ├─ 1. Find project root (.sageox marker)
+  ├─ 2. Verify auth + write access for ledger
+  ├─ 3. Clean ghost sessions (stale .recording.json from dead agents)
+  │
+  ├─ 4. Detect coding agent adapter
+  │     adapters.DetectAdapter() → iterate registered adapters
+  │     ClaudeCodeAdapter.Detect():
+  │       CLAUDE_CODE_ENTRYPOINT env? → true   (strongest early signal)
+  │       ~/.claude/ exists?           → true
+  │       ~/.claude/projects/ has entries? → true
+  │
+  ├─ 5. Find session file ← THIS IS WHERE THE DOT BUG HITS
+  │     adapter.FindSessionFile(agentID, since=now-5min)
+  │       compute projectHash from CWD (/ → -, _ → -, . → MISSING)
+  │       scan ~/.claude/projects/<hash>/*.jsonl modified < 5min
+  │       match agentID in JSONL content or fall back to most recent
+  │
+  └─ 6. Create RecordingState, write .recording.json
+#+END_EXAMPLE
+
+* Agent Command Dispatch
+
+=cmd/ox/agent.go:116-247=
+
+The dispatcher is a two-level pattern, not standard cobra:
+
+#+BEGIN_EXAMPLE
+ox agent <first_arg> [rest...]
+  │
+  ├─ Is it a cobra subcommand?
+  │   (prime, list, team-ctx, redact, instances)
+  │   → let cobra handle it
+  │
+  ├─ Is it a valid agent_id? (Ox + 4 alphanumeric chars)
+  │   → runWithAgentID(id, rest)
+  │     rest[0] matches:
+  │       "session" → session subcommand dispatch
+  │       "hook"    → runAgentHook(subargs)
+  │       "doctor"  → runAgentDoctor(subargs)
+  │       "distill" → runAgentDistill(subargs)
+  │
+  ├─ Is it a known agent subcommand without ID?
+  │   (doctor, session, distill)
+  │   → check SAGEOX_AGENT_ID env var
+  │
+  └─ Otherwise: "unknown command or invalid agent_id: <arg>"
+      ← THIS is why "ox agent hook SessionStart" fails
+#+END_EXAMPLE
+
+* Hook Pipeline
+
+=cmd/ox/agent_hook.go:48-103=
+
+** Why Hooks Fail
+
+Hooks installed by =ox integrate= (=hooks_claude.go:312-315=) call:
+
+#+BEGIN_SRC bash
+AGENT_ENV=claude-code ox agent hook UserPromptSubmit 2>&1 || true
+#+END_SRC
+
+The dispatcher sees "hook" as =first_arg=:
+1. Not a cobra subcommand (=prime=, =list=, etc.)? No
+2. Valid agent_id (=Ox<4char>=)? No
+3. Known subcommand (=doctor=, =session=)? No — =hook= isn't in this list either
+4. → Error: "unknown command or invalid agent_id: hook"
+
+The irony: =runAgentHook()= doesn't even USE the agent_id. It reads
+=session_id= from stdin JSON and resolves state via =ReadSessionMarker()=.
+
+** Event Phase Mapping
+
+#+BEGIN_EXAMPLE
+Claude Code Event    →  Canonical Phase   →  Handler
+─────────────────────────────────────────────────────
+SessionStart         →  PhaseStart        →  handleStart() (re-runs prime)
+PreCompact           →  PhaseCompact      →  handleCompact()
+PostToolUse          →  PhaseAfterTool    →  NOOP
+UserPromptSubmit     →  PhasePrompt       →  NOOP
+Stop                 →  PhaseStop         →  NOOP
+SessionEnd           →  PhaseEnd          →  NOOP
+#+END_EXAMPLE
+
+Only =PhaseStart= and =PhaseCompact= have behavior. All other hooks
+fire, route through the dispatcher, and do nothing — but they can't even
+get that far because the dispatcher rejects "hook" as an invalid arg.
+
+** Hook Installation
+
+=hooks_claude.go:303-315= installs 6 hooks into =.claude/settings.local.json=:
+
+#+BEGIN_SRC go
+var claudeLifecycleEvents = []string{
+    "SessionStart", "PreCompact", "PostToolUse",
+    "Stop", "SessionEnd", "UserPromptSubmit",
+}
+#+END_SRC
+
+Template (=constants/agent.go:37=):
+#+BEGIN_EXAMPLE
+if command -v ox >/dev/null 2>&1; then
+  AGENT_ENV=claude-code ox agent hook %s 2>&1 || true
+else
+  echo 'This repo uses SageOx: install ...'
+fi
+#+END_EXAMPLE
+
+* Agent Instance Lifecycle
+
+=internal/agentinstance/= + =internal/daemon/instances.go=
+
+** Agent ID Format
+
+=Ox= + 4 chars from =[0-9A-Za-z]= (=crypto/rand=).
+62^4 = 14,776,336 combinations. Generated by =GenerateAgentID()=
+with collision avoidance against existing IDs (10 retries max).
+
+** Heartbeat Classification
+
+| Status    | Heartbeat Age | Threshold |
+|-----------+---------------+-----------|
+| =active=  | < 30s         |           |
+| =idle=    | 30s -- 5min   | 30s       |
+| =stale=   | > 5min        | 5min      |
+| (pruned)  | > 24h         | MaxAge    |
+
+Max 100 instances per workspace.
+
+** Session Markers
+
+Stored in =/tmp/<user>/sageox/sessions/<session_id>.json=.
+Ephemeral (OS-cleaned on reboot). Used for prime idempotency:
+if marker exists for current Claude Code session, skip re-prime
+to save ~1k tokens.
+
+* Claude Code Detection (Two Separate Layers)
+
+** Layer 1: Agent Type Detection
+
+=pkg/agentx/agents/claudecode.go:50-76=
+
+Priority order:
+1. =CLAUDECODE=1= — set by Claude Code (may lag during hooks)
+2. =CLAUDE_CODE_ENTRYPOINT= — set earlier, more reliable
+3. =CLAUDE_CODE_SESSION_ID= — session tracking
+4. =AGENT_ENV= ∈ {=claude-code=, =claudecode=, =claude=}
+
+Note from source (lines 43-49): Claude Code runs SessionStart hooks
+BEFORE setting =CLAUDECODE=1= in subprocess env, so hooks must set
+=AGENT_ENV= explicitly.
+
+** Layer 2: Session Adapter Detection
+
+=internal/session/adapters/claude_code.go:68-98=
+
+1. =CLAUDE_CODE_ENTRYPOINT= env var → true
+2. =~/.claude/= exists → continue
+3. =~/.claude/projects/= has entries → true
+
+These are independent checks. Layer 1 succeeds (we ARE in Claude Code).
+Layer 2 succeeds (the adapter detects Claude Code). The failure is in
+=FindSessionFile()= — the project hash computation after detection.
+
+* Multi-Adapter Architecture
+
+=internal/session/adapters/adapter.go=
+
+Registry pattern with auto-registration via =init()=:
+
+| Adapter       | Detection Env Var          | Session File Pattern    |
+|---------------+----------------------------+-------------------------|
+| Claude Code   | =CLAUDE_CODE_ENTRYPOINT=   | =~/.claude/projects/<hash>/*.jsonl= |
+| Cursor        | =CURSOR_TRACE_ID=          | (TBD)                   |
+| Windsurf      | =WINDSURF_SESSION=         | (TBD)                   |
+| Cline         | =CLINE_TASK_ID=            | (TBD)                   |
+| Codex         | =CODEX_CI=                 | (manual adapter)        |
+
+* Observations
+
+** What's Well-Designed
+
+- Adapter registry pattern allows easy agent support extension
+- Session markers with prime idempotency save significant tokens
+- Agent ID format (=Ox<4char>=) is both human-readable and token-efficient
+- Ghost session cleanup prevents stale state from blocking new sessions
+- =.session_stopped= marker prevents auto-restart loops
+
+** What's Broken
+
+- The dot bug blocks all =ghq= users (high blast radius, one-line fix)
+- Hook dispatch requires agent_id but doesn't use it (architecture mismatch)
+- Only 2 of 6 hook phases have behavior (4 are pure overhead per message)
+- =ox doctor= passes all checks despite session recording being impossible
+  (it checks adapter detection but not =FindSessionFile=)
+
+** The Fold Connection
+
+This analysis was performed from a repo about Horner's method and
+fold/reduce parameter ordering across Lisp dialects. The connection:
+
+- Horner's method is a fold that evaluates polynomials efficiently
+- ox's session pipeline is also a fold: events → state → recording
+- Both break when you get the accumulator wrong
+
+In ox's case, the "accumulator" is the project hash, and the missing
+=.= → =-= transform means the fold produces the wrong intermediate value.
+Classic off-by-one in the reduction function.
+
+Or as the Schemers would say: the initial value of the fold was wrong,
+and no amount of correct combining function will save you.
