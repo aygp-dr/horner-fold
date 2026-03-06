@@ -349,6 +349,77 @@ chmod +x "$SCRIPT"
 tmux new-window -n "ox-$(date +%s)" -d "bash $SCRIPT"
 #+END_SRC
 
+* R009 — =projectHash= missing dot replacement causes =ErrSessionNotFound=
+
+** File
+
+=internal/session/adapters/claude_code.go:118-119=
+
+** Bug
+
+Path-to-hash normalization strips =/= and =_= but not =.=:
+
+#+BEGIN_SRC go
+// actual code (ox 0.2.0)
+projectHash := strings.ReplaceAll(cwd, string(os.PathSeparator), "-")
+projectHash = strings.ReplaceAll(projectHash, "_", "-")
+// MISSING:
+// projectHash = strings.ReplaceAll(projectHash, ".", "-")
+#+END_SRC
+
+** Effect
+
+For any repo path containing a dot-separated domain component (e.g.
+=github.com=), ox computes a different hash than Claude Code:
+
+#+BEGIN_EXAMPLE
+ox computes:   -Users-jwalsh-ghq-github.com-aygp-dr-horner-fold
+Claude Code:   -Users-jwalsh-ghq-github-com-aygp-dr-horner-fold
+                                    ^^^
+                              dot vs dash
+#+END_EXAMPLE
+
+=os.Stat()= fails → =ErrSessionNotFound= → "no active claude-code session found."
+
+** Affected repos
+
+Any path with =.= in a directory component. Extremely common: =github.com/=,
+=gitlab.com/=, any =ghq=-managed tree, any dotfile-adjacent path.
+
+** Fix (one line)
+
+#+BEGIN_SRC go
+projectHash := strings.ReplaceAll(cwd, string(os.PathSeparator), "-")
+projectHash = strings.ReplaceAll(projectHash, "_", "-")
+projectHash = strings.ReplaceAll(projectHash, ".", "-")  // ADD THIS
+#+END_SRC
+
+** Severity
+
+High. Breaks session detection for all =ghq=-organized repos under
+=github.com/= --- a superset of the users most likely to be early adopters
+of an agentic engineering tool.
+
+** Workaround
+
+None without patching. =ox session status= will always report no active
+session for affected paths regardless of daemon state or Claude Code activity.
+
+** Trace (from source)
+
+#+BEGIN_EXAMPLE
+ox agent <id> session start
+  → agent_session.go:139  adapters.DetectAdapter()
+    → claude_code.go:72   CLAUDE_CODE_ENTRYPOINT set → true  ✓
+  → agent_session.go:151  adapter.FindSessionFile(agentID, 5min)
+    → claude_code.go:118  projectHash = replace(cwd, "/", "-")
+    → claude_code.go:119  projectHash = replace(projectHash, "_", "-")
+                           // MISSING: replace(".", "-")
+    → claude_code.go:123  os.Stat(projectDir) → ENOENT  ✗
+    → claude_code.go:124  return ErrSessionNotFound
+  → agent_session.go:154  "no active claude-code session found"
+#+END_EXAMPLE
+
 * Meta: What Would Have Helped
 
 A single =ox quickstart= command that runs:
@@ -378,3 +449,4 @@ equivalent for SageOX should be =ox integrate && claude=.
 | R006 | Blog syntax works without =-p= flag     | Refuted  | Medium   |
 | R007 | Capture is slash commands, not daemon    | Confirmed | Critical |
 | R008 | Multiline =claude -p= works in tmux     | Refuted  | Medium   |
+| R009 | =projectHash= handles dots correctly    | Refuted  | High     |
