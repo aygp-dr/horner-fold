@@ -1,0 +1,147 @@
+#+TITLE: horner-fold
+#+AUTHOR: aygp-dr
+#+OPTIONS: toc:2 num:nil
+
+* Horner's Method as Universal Fold
+
+The kernel =acc * base + element= appears everywhere in CS under different
+names. This repository collects implementations across Lisp dialects and
+verifies core properties with formal methods.
+
+#+BEGIN_SRC mermaid :file docs/horner-pipeline.png
+flowchart LR
+    S["string\n\"horner!\""]
+    L["list of chars\n(h o r n e r !)"]
+    I["list of ints\n(104 111 114 ...)"]
+    N["bignum\n461241602111777"]
+    S -->|string->list| L
+    L -->|map char->int| I
+    I -->|fold Horner| N
+    N -->|unfold quot/rem| I
+    I -->|map int->char| L
+    L -->|list->string| S
+#+END_SRC
+
+** The Pattern
+
+#+BEGIN_EXAMPLE
+encode = foldl (λ acc c → acc * base + c) 0   -- catamorphism
+decode = unfoldr (λ n → (n `div` b, n `mod` b))  -- anamorphism
+#+END_EXAMPLE
+
+Instances: polynomial evaluation (Knuth §4.6.4), base conversion, Rabin-Karp
+hashing, Gödel numbering, positional/tuple encoding, CRC over GF(2)[x].
+
+The encode/decode pair is a fold/unfold duality — catamorphism and
+anamorphism composed give a hylomorphism (round-trip identity).
+
+** Implementations
+
+| Dialect | File                   | Fold primitive   | Lambda order    |
+|---------+------------------------+------------------+-----------------|
+| Guile   | =horner-guile.scm=     | ~fold~ (SRFI-1)  | (element acc)   |
+| Guile   | =horner-guile-rnrs.scm= | ~fold-left~ (rnrs) | (acc element) |
+| Chez    | =horner-chez.scm=      | ~fold-left~      | (acc element)   |
+| Racket  | =horner-racket.rkt=    | ~foldl~          | (element acc)   |
+| Elisp   | =horner.el=            | ~cl-reduce~      | (acc element)   |
+| Clojure | =horner.clj=           | ~reduce~         | (acc element)   |
+| Janet   | =horner.janet=         | ~reduce~         | (acc element)   |
+
+Lambda argument order is the main portability hazard. SRFI-1 and Racket's
+~foldl~ use =(element accumulator)=; everything else uses =(accumulator element)=.
+
+** Formal Verification
+
+| Tool   | Path                          | Properties verified                               |
+|--------+-------------------------------+---------------------------------------------------|
+| Alloy  | =formal/alloy/horner.als=     | Roundtrip (len 2, 3), recurrence, example instance |
+| TLA+   | =formal/tlaplus/Horner.tla=   | Roundtrip, non-negativity, injectivity (base 3, len 3) |
+| Lean4  | =formal/lean4/Horner/Basic.lean= | ~hornerEncode_append~, ~_nil~, ~_singleton~, ~_pair~, ~_triple~ |
+
+*** Running
+
+#+BEGIN_SRC sh
+# Guile
+guile horner-guile.scm
+
+# Alloy (requires alloy-analyzer)
+bash formal/alloy/run.sh
+
+# TLA+ (requires tla2tools.jar)
+bash formal/tlaplus/run.sh
+
+# Lean4 (requires lean/lake via elan)
+bash formal/lean4/run.sh
+#+END_SRC
+
+** Mathematical Background
+
+*** Horner Evaluation
+
+For coefficients $a_0, a_1, \ldots, a_{n-1}$ and base $b$:
+
+$$\text{encode}(\vec{a}, b) = \text{foldl}\;(\lambda\; \text{acc}\; c \to \text{acc} \cdot b + c)\; 0\; \vec{a}$$
+
+Expanded: $(\cdots((a_0 \cdot b + a_1) \cdot b + a_2) \cdots) \cdot b + a_{n-1}$
+
+This uses $n-1$ multiplications — optimal (Knuth Vol.2 §4.6.4).
+
+*** Decode (Unfold)
+
+$$\text{decode}(n, b, k) = \text{unfoldr}\;(\lambda\; n \to (n \div b,\; n \bmod b))\; n$$
+
+terminated after $k$ steps.
+
+*** Roundtrip Property
+
+For $b > 1$ and $0 \le a_i < b$:
+
+$$\text{decode}(\text{encode}(\vec{a}, b),\; b,\; |\vec{a}|) = \vec{a}$$
+
+Verified by TLA+ model checking (exhaustive for small domains) and Lean4
+theorem proving (structural induction via ~hornerEncode_append~).
+
+** Where Horner Appears
+
+| Domain                    | Kernel instance                        | Reference              |
+|---------------------------+----------------------------------------+------------------------|
+| Polynomial evaluation     | $\sum a_i x^i$ via fold                | Knuth §4.6.4           |
+| Base conversion           | digits → integer                       | elementary             |
+| Tuple encoding            | $(i,j,k) \to i m^2 + j m + k$         | SICP §2.5.3            |
+| Rabin-Karp hash           | rolling polynomial hash mod $p$        | Rabin & Karp 1987      |
+| Gödel numbering           | sequence → $\mathbb{N}$ injection      | Gödel 1931             |
+| Mixed-radix encoding      | Lehmer codes, factorial number system  | Knuth Vol.4A           |
+| CRC                       | polynomial division over GF(2)[x]      | Peterson & Brown 1961  |
+| Transformer positional PE | continuous relaxation of discrete Horner | Vaswani et al. 2017   |
+
+** Literate Source
+
+The org-mode literate source is in [[file:horner-fold.org][horner-fold.org]] — all code blocks
+tangle to the implementation files. The org file includes the comparison
+table, argument-order analysis, and threading-macro variants.
+
+** Project Structure
+
+#+BEGIN_EXAMPLE
+horner-fold/
+├── horner-fold.org          # literate source (org-babel, multi-dialect)
+├── horner-guile.scm         # Guile Scheme (SRFI-1 fold)
+├── horner-guile-rnrs.scm    # Guile Scheme (rnrs fold-left)
+├── horner-chez.scm          # Chez Scheme (native fold-left)
+├── horner-racket.rkt        # Racket (foldl, for/fold, threading)
+├── horner.el                # Emacs Lisp (cl-reduce, seq-reduce)
+├── horner.clj               # Clojure (reduce, ->> threading)
+├── horner.janet              # Janet (reduce, string/bytes)
+└── formal/
+    ├── alloy/horner.als     # Alloy: bounded model checking
+    ├── tlaplus/Horner.tla   # TLA+: state-level invariants
+    └── lean4/               # Lean4: proofs by structural induction
+#+END_EXAMPLE
+
+** References
+
+- Knuth, /The Art of Computer Programming/, Vol.2 §4.6.4; Vol.4A (combinatorial encodings)
+- Abelson & Sussman, /Structure and Interpretation of Computer Programs/, §2.5.3
+- Meijer, Fokkinga & Paterson, "Functional Programming with Bananas, Lenses, Envelopes and Barbed Wire" (1991)
+- Rabin & Karp, "Efficient Randomized Pattern-Matching Algorithms" (1987)
+- Vaswani et al., "Attention Is All You Need" (2017) — sinusoidal PE as continuous Horner

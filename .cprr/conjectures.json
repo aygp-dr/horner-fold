@@ -1,6 +1,31 @@
 {
-  "conjectures": null,
-  "next_id": 1,
+  "conjectures": [
+    {
+      "id": 1,
+      "title": "SRFI-1 fold and Racket foldl use (element accumulator) order while all others use (accumulator element)",
+      "hypothesis": "Lambda argument order is the primary source of bugs when porting Horner between Lisp dialects",
+      "status": "open",
+      "created_at": "2026-03-05T21:16:44.792415-05:00",
+      "updated_at": "2026-03-05T21:16:44.792415-05:00"
+    },
+    {
+      "id": 2,
+      "title": "Horner encode/decode is a fold/unfold duality",
+      "hypothesis": "For any base \u003e 1 and coefficients in [0,base), decode(encode(coeffs, base), base, len(coeffs)) = coeffs — verified in TLA+ and Lean4",
+      "status": "open",
+      "created_at": "2026-03-05T21:16:47.02276-05:00",
+      "updated_at": "2026-03-05T21:16:47.02276-05:00"
+    },
+    {
+      "id": 3,
+      "title": "Alloy bounded model checking needs wider integer bitwidth for Horner roundtrip",
+      "hypothesis": "6-bit Alloy integers overflow for base \u003e= 8; 8-bit suffices for bases \u003c 8 with sequences up to length 3",
+      "status": "open",
+      "created_at": "2026-03-05T21:16:48.96612-05:00",
+      "updated_at": "2026-03-05T21:16:48.96612-05:00"
+    }
+  ],
+  "next_id": 4,
   "config": {
     "local": true
   }

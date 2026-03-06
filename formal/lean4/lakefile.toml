@@ -1,0 +1,10 @@
+name = "Horner"
+version = "0.1.0"
+defaultTargets = ["horner"]
+
+[[lean_lib]]
+name = "Horner"
+
+[[lean_exe]]
+name = "horner"
+root = "Main"

@@ -61,6 +61,17 @@ dist-newstyle/
 *.pem
 *.key
 
+# Lean4
+.lake/
+/formal/lean4/.lake/
+/formal/lean4/build/
+
+# Alloy output
+/formal/alloy/horner/
+
+# TLA+ model checker state
+/formal/tlaplus/states/
+
 # Coverage / profiling
 htmlcov/
 .coverage

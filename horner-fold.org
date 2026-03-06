@@ -1,0 +1,381 @@
+#+TITLE: Horner's Method: Polynomial Evaluation and Tuple Encoding Across Lisps
+#+AUTHOR: jw
+#+DATE: 2026-03-05
+#+OPTIONS: toc:2 num:t
+#+PROPERTY: header-args :eval never-export
+
+* Overview
+
+Horner's method rewrites polynomial evaluation to minimize multiplications.
+The naïve form of ~ax³ + bx² + cx + d~ costs 6 multiplications; Horner's
+factored form ~((a·x + b)·x + c)·x + d~ costs 3 — optimal.
+
+The structural insight: *any reduce/fold over a sequence with a multiply-add
+kernel is Horner*. This makes it the natural idiom for:
+
+- Multi-index encoding (tuple → int)
+- Base conversion (digits → int)
+- String hashing / Rabin-Karp
+- Positional encoding (i·m² + j·m + k is Horner at base m)
+- Polynomial hashing over GF(2) (CRC)
+
+The encode/decode pair is a textbook example of ~fold~ / ~unfold~ duality:
+~fold~ collapses a list into a value; ~unfold~ generates a list from a seed.
+
+#+BEGIN_SRC mermaid :file horner-pipeline.png
+flowchart LR
+    S["string\n\"horner!\""]
+    L["list of chars\n(h o r n e r !)"]
+    I["list of ints\n(104 111 114 ...)"]
+    N["bignum\n456274836960289"]
+    S -->|string->list| L
+    L -->|map char->int| I
+    I -->|reduce/fold Horner| N
+    N -->|unfold quotient/remainder| I
+    I -->|map int->char| L
+    L -->|list->string| S
+#+END_SRC
+
+The pipeline is a chain of type-to-type conversions, each a map, reduce, or
+unfold. Threading macros make the data flow explicit.
+
+* The Core Abstraction
+
+The Horner kernel is always:
+
+#+BEGIN_EXAMPLE
+acc → acc * base + element
+#+END_EXAMPLE
+
+Feed it a sequence of coefficients (high to low) and a base; get a single
+integer. Everything below is a variation on this.
+
+* Guile Scheme
+
+** Canonical form with SRFI-1
+
+#+BEGIN_SRC scheme :tangle horner-guile.scm :mkdirp t
+(use-modules (srfi srfi-1))
+
+(define m 128)
+
+;;; SRFI-1 fold: (lambda (element accumulator) ...)
+;;; reverse so first char is most significant
+(define (horner-encode s base)
+  (fold (lambda (c acc) (+ (* acc base) c))
+        0
+        (map char->integer (string->list s))))
+
+(define (horner-decode n base)
+  (let loop ((n n) (acc '()))
+    (if (= n 0)
+        (list->string (map integer->char acc))
+        (loop (quotient  n base)
+              (cons (remainder n base) acc)))))
+
+(let* ((s "horner!")
+       (n (horner-encode s m)))
+  (format #t "encoded: ~a~%" n)
+  (format #t "decoded: ~a~%" (horner-decode n m)))
+#+END_SRC
+
+** With (rnrs lists) for fold-left
+
+#+BEGIN_SRC scheme :tangle horner-guile-rnrs.scm :mkdirp t
+(use-modules (rnrs lists))
+
+;;; (rnrs lists) fold-left: (lambda (accumulator element) ...)
+(define (horner-encode s base)
+  (fold-left (lambda (acc c) (+ (* acc base) c))
+             0
+             (map char->integer (string->list s))))
+#+END_SRC
+
+** Argument order summary
+
+| Module        | Proc        | Lambda order          |
+|---------------+-------------+-----------------------|
+| (srfi srfi-1) | fold        | (element accumulator) |
+| (rnrs lists)  | fold-left   | (accumulator element) |
+| —             | named let   | explicit              |
+
+* Chez Scheme
+
+~fold-left~ is native, no imports:
+
+#+BEGIN_SRC scheme :tangle horner-chez.scm :mkdirp t
+(define m 128)
+
+;;; fold-left native in Chez: (lambda (acc element) ...)
+(define (horner-encode s base)
+  (fold-left (lambda (acc c) (+ (* acc base) c))
+             0
+             (map char->integer (string->list s))))
+
+(define (horner-decode n base)
+  (let loop ((n n) (acc '()))
+    (if (= n 0)
+        (list->string (map integer->char acc))
+        (loop (quotient  n base)
+              (cons (remainder n base) acc)))))
+
+;;; Generalize to arbitrary tuples
+(define (encode-tuple indices base)
+  (fold-left (lambda (acc i) (+ (* acc base) i)) 0 indices))
+
+(define (decode-tuple n base rank)
+  (let loop ((n n) (r rank) (acc '()))
+    (if (= r 0) acc
+        (loop (quotient n base)
+              (- r 1)
+              (cons (remainder n base) acc)))))
+
+(display (horner-encode "horner!" m)) (newline)
+(display (encode-tuple '(1 2 3) 10))  (newline) ;; => 123
+(display (decode-tuple 123 10 3))     (newline) ;; => (1 2 3)
+#+END_SRC
+
+* Racket
+
+#+BEGIN_SRC racket :tangle horner-racket.rkt :mkdirp t
+#lang racket
+
+(define m 128)
+
+;;; foldl in Racket: (lambda (element accumulator) ...) — same as SRFI-1
+(define (horner-encode s base)
+  (foldl (lambda (c acc) (+ (* acc base) c))
+         0
+         (map char->integer (string->list s))))
+
+;;; for/fold is idiomatic Racket — reads as "for each c, accumulating acc"
+(define (horner-encode/for s base)
+  (for/fold ([acc 0])
+            ([c (map char->integer (string->list s))])
+    (+ (* acc base) c)))
+
+(define (horner-decode n base)
+  (let loop ([n n] [acc '()])
+    (if (= n 0)
+        (list->string (map integer->char acc))
+        (loop (quotient  n base)
+              (cons (remainder n base) acc)))))
+
+;;; Threading macro (~>) from racket/function — pipe left to right
+(require threading)
+
+(define (horner-encode/threaded s base)
+  (~> s
+      string->list
+      (map char->integer _)
+      (foldl (lambda (c acc) (+ (* acc base) c)) 0 _)))
+
+(let ([n (horner-encode "horner!" m)])
+  (displayln n)
+  (displayln (horner-decode n m))
+  (displayln (horner-encode/threaded "horner!" m)))
+#+END_SRC
+
+* Emacs Lisp
+
+Emacs Lisp has ~seq-reduce~ (Emacs 25+) and the ~dash~ library for pipelines:
+
+#+BEGIN_SRC emacs-lisp :tangle horner.el :mkdirp t
+;;; -*- lexical-binding: t -*-
+
+(defvar horner-base 128)
+
+;;; seq-reduce: (lambda (accumulator element) ...) — accumulator first
+(defun horner-encode (s base)
+  (seq-reduce (lambda (acc c) (+ (* acc base) c))
+              (mapcar #'identity (string-to-list s))
+              0))
+
+;;; decode: named loop via cl-loop
+(require 'cl-lib)
+(defun horner-decode (n base)
+  (cl-loop with acc = '()
+           while (> n 0)
+           do (push (% n base) acc)
+              (setq n (/ n base))
+           finally return (concat (mapcar #'identity acc))))
+
+;;; With dash threading macros (->> pipes right, -> pipes left)
+;;; (require 'dash) if available
+(defun horner-encode/dash (s base)
+  (->> (string-to-list s)
+       (seq-reduce (lambda (acc c) (+ (* acc base) c)) it 0)))
+
+;;; Pure cl-reduce version (built-in, no deps)
+(defun horner-encode/cl (s base)
+  (cl-reduce (lambda (acc c) (+ (* acc base) c))
+             (string-to-list s)
+             :initial-value 0))
+
+(let* ((s "horner!")
+       (n (horner-encode s horner-base)))
+  (message "encoded: %d" n)
+  (message "decoded: %s" (horner-decode n horner-base)))
+#+END_SRC
+
+~cl-reduce~ is the most portable — no extra deps, accumulator-first, matches
+Chez's ~fold-left~. ~seq-reduce~ is fine for modern Emacs.
+
+* Clojure
+
+Clojure's ~reduce~ is the workhorse. Threading macros are first-class:
+
+#+BEGIN_SRC clojure :tangle horner.clj :mkdirp t
+(ns horner.core)
+
+(def m 128)
+
+;;; reduce: (fn [acc el] ...) — accumulator first, always
+(defn horner-encode [s base]
+  (reduce (fn [acc c] (+ (* acc base) (int c)))
+          0
+          s))  ;; strings are seqable in Clojure — no string->list needed
+
+;;; decode: loop/recur is idiomatic unfold
+(defn horner-decode [n base]
+  (loop [n n acc []]
+    (if (zero? n)
+      (apply str (map char acc))
+      (recur (quot n base)
+             (cons (rem n base) acc)))))
+
+;;; ->> threading: left-to-right pipeline, value inserted as last arg
+(defn horner-encode-threaded [s base]
+  (->> s
+       (map int)
+       (reduce (fn [acc c] (+ (* acc base) c)) 0)))
+
+;;; -> threading: value inserted as first arg — useful for obj methods
+(defn horner-decode-threaded [n base]
+  (-> (loop [n n acc []]
+        (if (zero? n) acc
+            (recur (quot n base) (cons (rem n base) acc))))
+      (->> (map char))
+      (apply str [])))
+
+;;; as-> for mixed threading
+(defn horner-roundtrip [s base]
+  (as-> s $
+    (map int $)
+    (reduce (fn [acc c] (+ (* acc base) c)) 0 $)
+    (horner-decode $ base)))
+
+(let [n (horner-encode "horner!" m)]
+  (println "encoded:" n)
+  (println "decoded:" (horner-decode n m))
+  (println "roundtrip:" (horner-roundtrip "horner!" m)))
+#+END_SRC
+
+Note: Clojure strings are ~CharSequence~ and directly seqable — no
+~string->list~ needed. ~map int~ over a string yields codepoints directly.
+
+* Janet
+
+Janet is a Lisp-1 with a small footprint, close to Clojure semantics:
+
+#+BEGIN_SRC janet :tangle horner.janet :mkdirp t
+(def m 128)
+
+;;; reduce: (fn [acc el] ...) accumulator first
+(defn horner-encode [s base]
+  (reduce (fn [acc c] (+ (* acc base) c))
+          0
+          (map (fn [c] (chr c)) (string/bytes s))))
+
+;;; string/bytes gives byte values directly — no char->int step
+(defn horner-encode/bytes [s base]
+  (reduce (fn [acc b] (+ (* acc base) b))
+          0
+          (string/bytes s)))
+
+;;; decode: loop via while + array
+(defn horner-decode [n base]
+  (var n n)
+  (def acc @[])
+  (while (> n 0)
+    (array/insert acc 0 (% n base))
+    (set n (div n base)))
+  (string/from-bytes ;acc))
+
+;;; Janet has -> and ->> threading macros built-in
+(defn horner-encode/threaded [s base]
+  (->> (string/bytes s)
+       (reduce (fn [acc b] (+ (* acc base) b)) 0)))
+
+(let [n (horner-encode/bytes "horner!" m)]
+  (print "encoded: " n)
+  (print "decoded: " (horner-decode n m)))
+#+END_SRC
+
+Janet's ~string/bytes~ returns a tuple of byte values directly, skipping the
+~string->list~ + ~map char->int~ pipeline that other Lisps need. Very clean
+for this use case.
+
+* Comparison Table
+
+| Dialect   | Fold proc      | Lambda order    | String→ints         | Threading      |
+|-----------+----------------+-----------------+---------------------+----------------|
+| Guile     | fold (srfi-1)  | (el acc)        | map char->integer   | —              |
+| Guile     | fold-left rnrs | (acc el)        | map char->integer   | —              |
+| Chez      | fold-left      | (acc el)        | map char->integer   | —              |
+| Racket    | foldl          | (el acc)        | map char->integer   | ~> (threading) |
+| Elisp     | cl-reduce      | (acc el)        | string-to-list      | ->> (dash)     |
+| Clojure   | reduce         | (acc el)        | map int (seqable)   | ->> ->  as->   |
+| Janet     | reduce         | (acc el)        | string/bytes        | ->> ->         |
+
+Lambda order is the main footgun. Clojure, Chez, Elisp, Janet all agree:
+~(accumulator element)~. SRFI-1 and Racket's ~foldl~ invert this.
+
+* The Reduce-as-Type-Conversion Principle
+
+The insight behind preferring ~reduce~ for any type→type transformation:
+
+#+BEGIN_EXAMPLE
+string  →  list of chars  →  list of ints  →  bignum
+#+END_EXAMPLE
+
+Each arrow is a ~map~ or ~reduce~. Threading macros make the pipeline
+explicit and left-to-right. The Clojure ~->>~ version is the clearest
+expression of this:
+
+#+BEGIN_SRC clojure
+(->> "horner!"           ;; string (seqable)
+     (map int)           ;; seq of ints
+     (reduce (fn [acc c] ;; bignum
+               (+ (* acc 128) c))
+             0))
+#+END_SRC
+
+The pipeline reads like a type signature walking rightward. ~reduce~ is the
+natural sink for any sequence→scalar conversion; ~map~ handles
+element→element within a sequence. Filter selects; reduce collapses.
+
+The Horner kernel ~(fn [acc c] (+ (* acc base) c))~ is the minimal
+multiply-add: one line, no state, compositional. The decode direction is the
+formal dual — an unfold seeded at ~n~, terminating at 0.
+
+* Appendix: Arbitrary Tuple Encoding
+
+#+BEGIN_SRC clojure
+;;; Generalize encode to tuples of any rank
+(defn encode-tuple [indices base]
+  (reduce (fn [acc i] (+ (* acc base) i)) 0 indices))
+
+(defn decode-tuple [n base rank]
+  (loop [n n r rank acc '()]
+    (if (= r 0) acc
+        (recur (quot n base) (dec r) (cons (rem n base) acc)))))
+
+(encode-tuple [1 2 3] 10)        ;; => 123
+(decode-tuple 123 10 3)          ;; => (1 2 3)
+(encode-tuple [3 1 4 1 5] 6)     ;; => 4259
+#+END_SRC
+
+This is exactly ~(define (encode i j k m) (+ (* i m m) (* j m) k))~ from
+the SICP discussion — Horner at base ~m~ over the index tuple. The
+connection: polynomial coefficients = tuple elements = "digits" in base ~m~.
