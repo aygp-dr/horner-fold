@@ -405,6 +405,21 @@ of an agentic engineering tool.
 None without patching. =ox session status= will always report no active
 session for affected paths regardless of daemon state or Claude Code activity.
 
+** Empirical Impact (from =~/.claude/projects/*/*.jsonl=)
+
+Failed ox commands counted across all Claude Code session files:
+
+| Error                                  | horner-fold | seven-concerns | Total |
+|----------------------------------------+-------------+----------------+-------|
+| =unknown command or invalid agent_id: hook= |          34 |              4 |    38 |
+| =no active claude-code session found=  |          39 |              5 |    44 |
+
+In one session (=40d4dc52=, 1.1 MB JSONL), 234 lines mention =ox agent=.
+The hook error fires on every =UserPromptSubmit=, =PostToolUse=, =Stop=,
+=SessionStart=, =SessionEnd=, and =PreCompact= — injected as
+=<system-reminder>= tags consuming ~50 tokens each ≈ *1,600 wasted tokens*
+per session.
+
 ** Trace (from source)
 
 #+BEGIN_EXAMPLE
