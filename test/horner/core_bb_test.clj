@@ -1,7 +1,8 @@
-(ns test-horner-bb
-  "Babashka-compatible tests (no test.check dependency).
-   Run via: bb -cp src:tests -m test-horner-bb"
-  (:require [clojure.test :refer [deftest is testing run-tests]]
+(ns horner.core-bb-test
+  "Tests without a test.check dependency (a seeded pseudo-random roundtrip
+   instead of properties). Runs on the JVM (bb test) and under babashka
+   (bb test:bb)."
+  (:require [clojure.test :refer [deftest is testing]]
             [horner.core :refer [horner-encode horner-decode
                                  horner-encode-threaded horner-decode-threaded
                                  horner-roundtrip m]]))
@@ -46,11 +47,3 @@
               s (apply str chars)]
           (is (= s (horner-decode (horner-encode s base) base))
               (str "roundtrip failed for: " (pr-str s) " base=" base)))))))
-
-(defn -main [& _args]
-  (let [result (run-tests)]
-    (System/exit (if (and (zero? (:fail result))
-                          (zero? (:error result)))
-                  0 1))))
-
-(-main)

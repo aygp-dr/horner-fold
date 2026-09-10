@@ -222,19 +222,10 @@ test-elisp: ## Test Emacs Lisp: batch-mode roundtrip assertions
 	                (+ (* (+ (* 65 256) 66) 256) 67)))) \
 	(message "All Emacs Lisp tests passed.")'
 
-test-clojure: ## Test Clojure: roundtrip assertions via bb/clj
+test-clojure: ## Test Clojure: JVM + babashka suites (bb test, bb test:bb)
 	$(call require-cmd,CLOJURE,Clojure (bb or clj))
-	@echo "--- Clojure: roundtrip tests ---"
-	@$(CLOJURE) -e ' \
-	(defn horner-encode [s base] \
-	  (reduce (fn [acc c] (+ (* acc base) (int c))) 0 s)) \
-	(defn horner-decode [n base] \
-	  (loop [n n acc []] \
-	    (if (zero? n) (apply str (map char acc)) \
-	      (recur (quot n base) (cons (rem n base) acc))))) \
-	(assert (= "horner!" (horner-decode (horner-encode "horner!" 128) 128))) \
-	(assert (= 123 (reduce (fn [acc i] (+ (* acc 10) i)) 0 [1 2 3]))) \
-	(println "All Clojure tests passed.")'
+	@echo "--- Clojure: test suites (JVM, then babashka) ---"
+	bb test && bb test:bb
 
 test-janet: ## Test Janet: roundtrip assertions
 	$(call require-cmd,JANET,Janet)

@@ -1,5 +1,5 @@
-(ns test-horner
-  (:require [clojure.test :refer [deftest is testing are run-tests]]
+(ns horner.core-test
+  (:require [clojure.test :refer [deftest is testing are]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -153,17 +153,3 @@
                     (if (zero? n) acc
                         (recur (quot n base) (into [(rem n base)] acc))))]
       (= coeffs decoded))))
-
-;; =============================================================================
-;; Run tests when loaded as a script
-;; =============================================================================
-
-(defn -main [& _args]
-  (let [result (run-tests)]
-    (System/exit (if (and (zero? (:fail result))
-                          (zero? (:error result)))
-                  0 1))))
-
-;; When run via `clj -M tests/test_horner.clj`, execute tests
-(when (= *file* (System/getProperty "babashka.file" *file*))
-  (-main))
