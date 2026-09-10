@@ -138,6 +138,28 @@ horner-fold/
     └── lean4/               # Lean4: proofs by structural induction
 #+END_EXAMPLE
 
+** Clojure Development
+
+The Clojure library follows the aygp-dr Clojure standard: =deps.edn= is the
+canonical manifest and =bb.edn= provides the tasks. The library lives in
+[[file:src/horner/core.clj][src/horner/core.clj]]; =horner.clj= at the root is
+the standalone demo script (=bb run=).
+
+| Task                    | What it does                                 |
+|-------------------------+----------------------------------------------|
+| =bb test=               | JVM test suite (=clojure -M:test=)           |
+| =bb test:bb=            | the same tests under babashka                |
+| =bb lint=               | clj-kondo (fails on errors)                  |
+| =bb fmt= / =bb fmt:fix= | cljfmt check / fix                           |
+| =bb check=              | lint + fmt + test + test:bb (CI runs this)   |
+
+Data specs live in =src/horner/specs.clj=, and each fn in =horner.core= has
+an =s/fdef= right after its =defn= (see the
+[[https://clojure.org/guides/spec][clojure.spec guide]]).
+=test/horner/specs_test.clj= runs =stest/check= over every fn, checking for
+example that decoding is a right inverse of encoding. The unit tests run with
+instrumentation on, and =clj -M:dev= instruments at the REPL.
+
 ** References
 
 - Knuth, /The Art of Computer Programming/, Vol.2 §4.6.4; Vol.4A (combinatorial encodings)
