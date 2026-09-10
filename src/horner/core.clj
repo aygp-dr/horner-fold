@@ -4,7 +4,7 @@
 
 ;;; reduce: (fn [acc el] ...) — accumulator first, always
 (defn horner-encode [s base]
-  (reduce (fn [acc c] (+ (* acc base) (int c)))
+  (reduce (fn [acc c] (+' (*' acc base) (int c)))
           0
           s))  ;; strings are seqable in Clojure — no string->list needed
 
@@ -20,7 +20,7 @@
 (defn horner-encode-threaded [s base]
   (->> s
        (map int)
-       (reduce (fn [acc c] (+ (* acc base) c)) 0)))
+       (reduce (fn [acc c] (+' (*' acc base) c)) 0)))
 
 ;;; -> threading: value inserted as first arg — useful for obj methods
 (defn horner-decode-threaded [n base]
@@ -34,5 +34,5 @@
 (defn horner-roundtrip [s base]
   (as-> s $
     (map int $)
-    (reduce (fn [acc c] (+ (* acc base) c)) 0 $)
+    (reduce (fn [acc c] (+' (*' acc base) c)) 0 $)
     (horner-decode $ base)))
