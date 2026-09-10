@@ -1,5 +1,6 @@
 (ns horner.core-test
-  (:require [clojure.test :refer [deftest is testing are]]
+  (:require [clojure.spec.test.alpha :as stest]
+            [clojure.test :refer [deftest is testing are use-fixtures]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -7,6 +8,10 @@
             [horner.core :refer [horner-encode horner-decode
                                  horner-encode-threaded horner-decode-threaded
                                  horner-roundtrip m]]))
+
+;; Exercise every s/fdef :args spec while the unit tests run.
+(use-fixtures :once
+  (fn [f] (stest/instrument) (try (f) (finally (stest/unstrument)))))
 
 ;; =============================================================================
 ;; Known-value tests

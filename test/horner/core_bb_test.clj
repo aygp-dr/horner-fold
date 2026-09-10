@@ -2,10 +2,15 @@
   "Tests without a test.check dependency (a seeded pseudo-random roundtrip
    instead of properties). Runs on the JVM (bb test) and under babashka
    (bb test:bb)."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.spec.test.alpha :as stest]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [horner.core :refer [horner-encode horner-decode
                                  horner-encode-threaded horner-decode-threaded
                                  horner-roundtrip m]]))
+
+;; Exercise every s/fdef :args spec while the unit tests run.
+(use-fixtures :once
+  (fn [f] (stest/instrument) (try (f) (finally (stest/unstrument)))))
 
 (deftest test-known-roundtrip
   (testing "encode then decode 'horner!' at base 128"
