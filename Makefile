@@ -93,6 +93,7 @@ endef
 .PHONY: run-guile run-chez run-racket run-elisp run-clojure run-janet run-all
 .PHONY: test-guile test-chez test-racket test-elisp test-clojure test-janet
 .PHONY: test-guile-properties test-python test-all test
+.PHONY: deps install
 .PHONY: formal-alloy formal-tla formal-lean formal-all
 .PHONY: tangle install-racket-deps
 .PHONY: clean distclean ci check-tools lint
@@ -257,6 +258,21 @@ test-all: test-guile test-chez test-racket test-elisp test-clojure test-janet te
 # every language suite, including the Python Hypothesis property suite; a
 # green `test` means every suite ran.
 test: test-all ## Run the canonical test suite (all languages)
+
+# --------------------------------------------------------------------------
+# Dependency targets (deps / install)
+#
+# deps prefetches the Clojure :test alias for CI cache warmup; -P is
+# download-only and never runs anything. install aliases deps -- there is no
+# build artifact to produce. Both degrade gracefully when the clojure CLI is
+# absent (bb covers the fast Clojure path).
+# --------------------------------------------------------------------------
+deps: ## Prefetch Clojure :test deps (CI cache warmup, no run)
+	@command -v clojure >/dev/null 2>&1 \
+		&& { echo "Prefetching Clojure :test deps..."; clojure -P -M:test; } \
+		|| echo "SKIP: clojure CLI not found; nothing to prefetch."
+
+install: deps ## Alias for deps; no build artifact to install
 
 # ============================================================================
 # Formal verification targets
