@@ -92,7 +92,7 @@ endef
 .PHONY: help
 .PHONY: run-guile run-chez run-racket run-elisp run-clojure run-janet run-all
 .PHONY: test-guile test-chez test-racket test-elisp test-clojure test-janet
-.PHONY: test-guile-properties test-python test-all
+.PHONY: test-guile-properties test-python test-all test
 .PHONY: formal-alloy formal-tla formal-lean formal-all
 .PHONY: tangle install-racket-deps
 .PHONY: clean distclean ci check-tools lint
@@ -251,7 +251,12 @@ test-python: ## Test Python: Hypothesis property-based tests
 	$(call require-cmd,PYTEST,pytest)
 	$(PYTEST) -v $(TEST_PYTHON)
 
-test-all: test-guile test-chez test-racket test-elisp test-clojure test-janet ## Run all language test suites (parallel-safe)
+test-all: test-guile test-chez test-racket test-elisp test-clojure test-janet test-python ## Run all language test suites (parallel-safe)
+
+# Canonical test target. This is a polyglot showcase, so `make test` runs
+# every language suite, including the Python Hypothesis property suite; a
+# green `test` means every suite ran.
+test: test-all ## Run the canonical test suite (all languages)
 
 # ============================================================================
 # Formal verification targets
