@@ -58,14 +58,14 @@
   (testing "->> threaded encode matches plain encode"
     (doseq [s ["horner!" "abc" "A" "Hello, World!"]]
       (is (= (horner-encode s m)
-              (horner-encode-threaded s m))
+             (horner-encode-threaded s m))
           (str "threaded encode differs for: " s))))
 
   (testing "-> threaded decode matches plain decode"
     (doseq [s ["horner!" "abc" "A" "Hello, World!"]]
       (let [n (horner-encode s m)]
         (is (= (horner-decode n m)
-                (horner-decode-threaded n m))
+               (horner-decode-threaded n m))
             (str "threaded decode differs for n=" n)))))
 
   (testing "as-> roundtrip matches explicit encode+decode"
@@ -131,8 +131,8 @@
               (gen/bind (gen/choose 1 (dec base))
                         (fn [first-coeff]
                           (gen/bind (gen/vector (gen/choose 0 (dec base)) 0 5)
-                                   (fn [rest-coeffs]
-                                     (gen/return [base (into [first-coeff] rest-coeffs)]))))))))
+                                    (fn [rest-coeffs]
+                                      (gen/return [base (into [first-coeff] rest-coeffs)]))))))))
 
 (defspec polynomial-equivalence 200
   (prop/for-all [[base coeffs] gen-nonzero-leading-coeffs]
