@@ -174,22 +174,22 @@ test-guile: ## Test Guile: property-based tests (SRFI-64, 1000 trials)
 test-chez: ## Test Chez: roundtrip + tuple encoding assertions
 	$(call require-cmd,CHEZ,Chez Scheme)
 	@echo "--- Chez Scheme: roundtrip tests ---"
-	@echo '(define m 128) \
+	@echo "(define m 128) \
 	(define (horner-encode s base) (fold-left (lambda (acc c) (+ (* acc base) c)) 0 (map char->integer (string->list s)))) \
 	(define (horner-decode n base) (let loop ((n n) (acc (quote ()))) (if (= n 0) (list->string (map integer->char acc)) (loop (quotient n base) (cons (remainder n base) acc))))) \
 	(define (encode-tuple indices base) (fold-left (lambda (acc i) (+ (* acc base) i)) 0 indices)) \
 	(define (decode-tuple n base rank) (let loop ((n n) (r rank) (acc (quote ()))) (if (= r 0) acc (loop (quotient n base) (- r 1) (cons (remainder n base) acc))))) \
-	(assert (equal? "horner!" (horner-decode (horner-encode "horner!" m) m))) \
+	(assert (equal? \"horner!\" (horner-decode (horner-encode \"horner!\" m) m))) \
 	(assert (= 123 (encode-tuple (quote (1 2 3)) 10))) \
 	(assert (equal? (quote (1 2 3)) (decode-tuple 123 10 3))) \
 	(assert (= 4259 (encode-tuple (quote (3 1 4 1 5)) 6))) \
 	(assert (equal? (quote (3 1 4 1 5)) (decode-tuple 4259 6 5))) \
-	(display "All Chez tests passed.") (newline)' | $(CHEZ) --script /dev/stdin
+	(display \"All Chez tests passed.\") (newline)" | $(CHEZ) --script /dev/stdin
 
 test-racket: ## Test Racket: roundtrip and encoding assertions
 	$(call require-cmd,RACKET,Racket)
 	@echo "--- Racket: roundtrip tests ---"
-	@$(RACKET) -e ' \
+	@$(RACKET) -e " \
 	(define m 128) \
 	(define (horner-encode s base) \
 	  (foldl (lambda (c acc) (+ (* acc base) c)) 0 \
@@ -198,16 +198,16 @@ test-racket: ## Test Racket: roundtrip and encoding assertions
 	  (let loop ([n n] [acc (list)]) \
 	    (if (= n 0) (list->string (map integer->char acc)) \
 	        (loop (quotient n base) (cons (remainder n base) acc))))) \
-	(unless (equal? "horner!" (horner-decode (horner-encode "horner!" m) m)) \
-	  (error "roundtrip failed")) \
+	(unless (equal? \"horner!\" (horner-decode (horner-encode \"horner!\" m) m)) \
+	  (error \"roundtrip failed\")) \
 	(unless (= 123 (foldl (lambda (c acc) (+ (* acc 10) c)) 0 (list 1 2 3))) \
-	  (error "tuple encode failed")) \
-	(displayln "All Racket tests passed.")'
+	  (error \"tuple encode failed\")) \
+	(displayln \"All Racket tests passed.\")"
 
 test-elisp: ## Test Emacs Lisp: batch-mode roundtrip assertions
 	$(call require-cmd,EMACS,Emacs)
 	@echo "--- Emacs Lisp: roundtrip tests ---"
-	@$(EMACS) --batch --eval ' \
+	@$(EMACS) --batch --eval " \
 	(require (quote cl-lib)) \
 	(defun horner-encode (s base) \
 	  (cl-reduce (lambda (acc c) (+ (* acc base) c)) \
@@ -217,11 +217,11 @@ test-elisp: ## Test Emacs Lisp: batch-mode roundtrip assertions
 	           while (> n 0) \
 	           do (push (% n base) acc) (setq n (/ n base)) \
 	           finally return (concat acc))) \
-	(let* ((s "horner!") (n (horner-encode s 128))) \
+	(let* ((s \"horner!\") (n (horner-encode s 128))) \
 	  (cl-assert (equal s (horner-decode n 128))) \
-	  (cl-assert (= (horner-encode "ABC" 256) \
+	  (cl-assert (= (horner-encode \"ABC\" 256) \
 	                (+ (* (+ (* 65 256) 66) 256) 67)))) \
-	(message "All Emacs Lisp tests passed.")'
+	(message \"All Emacs Lisp tests passed.\")"
 
 test-clojure: ## Test Clojure: JVM + babashka suites (bb test, bb test:bb)
 	$(call require-cmd,CLOJURE,Clojure (bb or clj))
@@ -231,7 +231,7 @@ test-clojure: ## Test Clojure: JVM + babashka suites (bb test, bb test:bb)
 test-janet: ## Test Janet: roundtrip assertions
 	$(call require-cmd,JANET,Janet)
 	@echo "--- Janet: roundtrip tests ---"
-	@$(JANET) -e ' \
+	@$(JANET) -e " \
 	(defn horner-encode [s base] \
 	  (reduce (fn [acc b] (+ (* acc base) b)) 0 (string/bytes s))) \
 	(defn horner-decode [n base] \
@@ -240,9 +240,9 @@ test-janet: ## Test Janet: roundtrip assertions
 	    (array/insert acc 0 (% n base)) \
 	    (set n (div n base))) \
 	  (string/from-bytes ;acc)) \
-	(assert (= "horner!" (horner-decode (horner-encode "horner!" 128) 128))) \
+	(assert (= \"horner!\" (horner-decode (horner-encode \"horner!\" 128) 128))) \
 	(assert (= 123 (reduce (fn [acc i] (+ (* acc 10) i)) 0 [1 2 3]))) \
-	(print "All Janet tests passed.")'
+	(print \"All Janet tests passed.\")"
 
 test-guile-properties: ## Test Guile: full property suite (alias)
 	$(call require-cmd,GUILE,Guile Scheme)
