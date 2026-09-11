@@ -1,5 +1,6 @@
-(ns test-horner
-  (:require [clojure.test :refer [deftest is testing are run-tests]]
+(ns horner.core-test
+  (:require [clojure.spec.test.alpha :as stest]
+            [clojure.test :refer [deftest is testing are use-fixtures]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -7,6 +8,10 @@
             [horner.core :refer [horner-encode horner-decode
                                  horner-encode-threaded horner-decode-threaded
                                  horner-roundtrip m]]))
+
+;; Exercise every s/fdef :args spec while the unit tests run.
+(use-fixtures :once
+  (fn [f] (stest/instrument) (try (f) (finally (stest/unstrument)))))
 
 ;; =============================================================================
 ;; Known-value tests
@@ -58,14 +63,14 @@
   (testing "->> threaded encode matches plain encode"
     (doseq [s ["horner!" "abc" "A" "Hello, World!"]]
       (is (= (horner-encode s m)
-              (horner-encode-threaded s m))
+             (horner-encode-threaded s m))
           (str "threaded encode differs for: " s))))
 
   (testing "-> threaded decode matches plain decode"
     (doseq [s ["horner!" "abc" "A" "Hello, World!"]]
       (let [n (horner-encode s m)]
         (is (= (horner-decode n m)
-                (horner-decode-threaded n m))
+               (horner-decode-threaded n m))
             (str "threaded decode differs for n=" n)))))
 
   (testing "as-> roundtrip matches explicit encode+decode"
@@ -131,8 +136,8 @@
               (gen/bind (gen/choose 1 (dec base))
                         (fn [first-coeff]
                           (gen/bind (gen/vector (gen/choose 0 (dec base)) 0 5)
-                                   (fn [rest-coeffs]
-                                     (gen/return [base (into [first-coeff] rest-coeffs)]))))))))
+                                    (fn [rest-coeffs]
+                                      (gen/return [base (into [first-coeff] rest-coeffs)]))))))))
 
 (defspec polynomial-equivalence 200
   (prop/for-all [[base coeffs] gen-nonzero-leading-coeffs]
@@ -153,17 +158,3 @@
                     (if (zero? n) acc
                         (recur (quot n base) (into [(rem n base)] acc))))]
       (= coeffs decoded))))
-
-;; =============================================================================
-;; Run tests when loaded as a script
-;; =============================================================================
-
-(defn -main [& _args]
-  (let [result (run-tests)]
-    (System/exit (if (and (zero? (:fail result))
-                          (zero? (:error result)))
-                  0 1))))
-
-;; When run via `clj -M tests/test_horner.clj`, execute tests
-(when (= *file* (System/getProperty "babashka.file" *file*))
-  (-main))
